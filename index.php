@@ -25,7 +25,7 @@ function handleFileUpload($file, $invoice_no, &$form_data)
         }
     }
 
-    $form_data['vendor_logo'] = 'No File Selected';
+    $form_data['vendor_logo'] = 'No File Selected'; // ফলব্যাক
     return false;
 }
 
@@ -35,8 +35,11 @@ $form_data = [];
 $json_save_message = '';
 $json_file_path = '';
 $dir = 'invoices/';
+$default_json_file = $dir . 'example_invoice.json';
+$show_preview = false; // নতুন ফ্ল্যাগ: কখন প্রিভিউ দেখাবো?
 
 if ($is_post) {
+    // === POST লজিক: ফর্ম সাবমিশন ও JSON সেভ ===
     $form_data = $_POST;
     $invoice_no = $form_data['invoice_no'] ?? 'INV-' . time();
 
@@ -47,18 +50,17 @@ if ($is_post) {
         $form_data['vendor_logo'] = $form_data['existing_vendor_logo'] ?? 'No File Selected';
     }
 
-
     // কাজের আইটেমগুলোকে একটি স্ট্রাকচার্ড অ্যারেতে একত্রিত করা হচ্ছে
     $work_items = [];
     if (isset($form_data['work_title']) && is_array($form_data['work_title'])) {
         $count = count($form_data['work_title']);
         for ($i = 0; $i < $count; $i++) {
             $work_items[] = [
-                'work_title'      => $form_data['work_title'][$i] ?? '',
+                'work_title' => $form_data['work_title'][$i] ?? '',
                 'work_particular' => $form_data['work_particular'][$i] ?? '',
-                'work_qty'        => (float)($form_data['work_qty'][$i] ?? 0),
-                'work_rate'       => (float)($form_data['work_rate'][$i] ?? 0),
-                'amount'          => (float)($form_data['amount'][$i] ?? 0),
+                'work_qty' => (float) ($form_data['work_qty'][$i] ?? 0),
+                'work_rate' => (float) ($form_data['work_rate'][$i] ?? 0),
+                'amount' => (float) ($form_data['amount'][$i] ?? 0),
             ];
         }
     }
@@ -70,14 +72,14 @@ if ($is_post) {
         $count = count($form_data['vendor_bank']);
         for ($i = 0; $i < $count; $i++) {
             $bank_items[] = [
-                'vendor_bank'           => $form_data['vendor_bank'][$i] ?? '',
-                'vendor_bank_account'   => $form_data['vendor_bank_account'][$i] ?? '',
-                'vendor_bank_branch'    => $form_data['vendor_bank_branch'][$i] ?? '',
-                'vendor_bank_routing'   => $form_data['vendor_bank_routing'][$i] ?? '',
-                'vendor_mfs_title'      => $form_data['vendor_mfs_title'][$i] ?? '',
-                'vendor_mfs_type'       => $form_data['vendor_mfs_type'][$i] ?? '',
-                'vendor_mfs_account'    => $form_data['vendor_mfs_account'][$i] ?? '',
-                'vendor_amount_note'    => $form_data['vendor_amount_note'][$i] ?? '',
+                'vendor_bank' => $form_data['vendor_bank'][$i] ?? '',
+                'vendor_bank_account' => $form_data['vendor_bank_account'][$i] ?? '',
+                'vendor_bank_branch' => $form_data['vendor_bank_branch'][$i] ?? '',
+                'vendor_bank_routing' => $form_data['vendor_bank_routing'][$i] ?? '',
+                'vendor_mfs_title' => $form_data['vendor_mfs_title'][$i] ?? '',
+                'vendor_mfs_type' => $form_data['vendor_mfs_type'][$i] ?? '',
+                'vendor_mfs_account' => $form_data['vendor_mfs_account'][$i] ?? '',
+                'vendor_amount_note' => $form_data['vendor_amount_note'][$i] ?? '',
             ];
         }
     }
@@ -118,6 +120,31 @@ if ($is_post) {
     } else {
         $json_save_message = '<p style="color: red; font-weight: bold;">❌ Error! Could not save JSON file. Check directory permissions (<code>' . htmlspecialchars($dir) . '</code>).</p>';
     }
+
+    $show_preview = true; // POST হলে প্রিভিউ দেখাও
+
+} else {
+    // === GET লজিক: ডিফল্ট JSON লোড ও প্রিভিউ দেখাও ===
+    if (file_exists($default_json_file)) {
+        $json_content = @file_get_contents($default_json_file);
+
+        if ($json_content) {
+            $form_data = json_decode($json_content, true);
+        }
+
+        if ($form_data !== null && $form_data !== []) {
+            // ডেটা সফলভাবে লোড হয়েছে: প্রিভিউ দেখাও
+            $show_preview = true;
+            $json_file_path = $default_json_file; // ডাউনলোড লিংকের জন্য পাথ সেট
+            $json_save_message = '<p style="color: blue; font-weight: bold;">ⓘ Default Invoice Preview.</p>';
+        } else {
+            // JSON ফাইল ইনভ্যালিড/খালি: ফর্ম দেখাও
+            $json_save_message = '<p style="color: red; font-weight: bold;">❌ Error! Default JSON file is invalid or empty. Showing form.</p>';
+        }
+    } else {
+        // ফাইল পাওয়া যায়নি: ফর্ম দেখাও
+        $json_save_message = '<p style="color: orange; font-weight: bold;">⚠️ Warning: Default JSON file <code>' . htmlspecialchars($default_json_file) . '</code> not found. Showing empty form.</p>';
+    }
 }
 ?>
 
@@ -157,7 +184,7 @@ if ($is_post) {
         }
 
         /* Form Specific Styles */
-        <?php if (!$is_post): ?>label {
+        <?php if (!$show_preview): ?>label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
@@ -239,7 +266,7 @@ if ($is_post) {
         <?php endif; ?>
 
         /* A4 Invoice Preview Styles */
-        <?php if ($is_post): ?>.container {
+        <?php if ($show_preview): ?>.container {
             padding: 0;
             background: none;
             box-shadow: none;
@@ -248,14 +275,13 @@ if ($is_post) {
 
         .invoice-page {
             width: 210mm;
-            /* A4 width */
             min-height: 297mm;
-            /* A4 height */
             margin: 0 auto;
-            padding: 20mm;
+            padding: 15mm;
             background: white;
             box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
             box-sizing: border-box;
+            position: relative;
         }
 
         .action-buttons {
@@ -274,65 +300,181 @@ if ($is_post) {
             margin-left: 10px;
         }
 
-        .invoice-header .vendor-info {
-            float: left;
-            width: 45%;
+        /* Updated Design Styles */
+        .invoice-header-custom {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 30px;
         }
 
-        .invoice-header .invoice-meta {
-            float: right;
-            width: 45%;
+        .vendor-logo-box {
+            flex-basis: 30%;
+        }
+
+        .vendor-logo-box img {
+            max-width: 100%;
+            height: auto;
+            max-height: 80px;
+        }
+
+        .invoice-title-meta {
+            flex-basis: 30%;
             text-align: right;
         }
 
-        .invoice-header::after {
-            content: "";
-            display: table;
-            clear: both;
+        .invoice-title-meta h1 {
+            font-size: 2.5em;
+            color: #333;
+            margin: 0 0 10px 0;
+            border-bottom: none;
         }
 
-        h1 {
-            color: #007bff;
-            border-bottom: 2px solid #007bff;
-            padding-bottom: 5px;
+        .invoice-title-meta p {
+            margin: 0;
+            line-height: 1.4;
+            font-size: 1.1em;
+        }
+
+        .invoice-title-meta strong {
+            color: #555;
+        }
+
+        .address-section {
+            margin-top: 20px;
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+        }
+
+        .address-box {
+            flex-basis: 48%;
+            padding: 15px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+
+        .address-box h3 {
             margin-top: 0;
+            font-size: 1.1em;
+            color: #007bff;
+            border-bottom: 1px dashed #ccc;
+            padding-bottom: 5px;
+            margin-bottom: 10px;
         }
 
-        table {
-            width: 100%;
+        .address-box p {
+            margin: 0;
+            line-height: 1.5;
+            font-size: 0.95em;
+        }
+
+        /* Table Styling */
+        .work-items-table table {
+            border: 1px solid #ccc;
+            margin-top: 30px;
             border-collapse: collapse;
-            margin-top: 15px;
         }
 
-        th,
-        td {
-            border: 1px solid #ddd;
-            padding: 8px;
-            text-align: left;
+        .work-items-table th,
+        .work-items-table td {
+            border: 1px solid #ccc;
+            padding: 10px;
+            font-size: 0.95em;
         }
 
-        th {
-            background-color: #f2f2f2;
+        .work-items-table th {
+            background-color: #f0f0f0;
+            text-transform: uppercase;
         }
 
         .text-right {
             text-align: right;
         }
 
-        .clear {
-            clear: both;
+        .work-title-col {
+            font-weight: bold;
         }
 
-        .total-box {
-            border: 2px solid #007bff;
-            padding: 10px;
-            margin-top: 10px;
-        }
-
-        .bank-section {
+        /* Total Summary */
+        .total-summary {
+            display: flex;
+            justify-content: flex-end;
             margin-top: 30px;
+        }
+
+        .total-box-custom {
+            width: 50%;
+            border: 2px solid #007bff;
+        }
+
+        .total-box-custom table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 0;
+        }
+
+        .total-box-custom th,
+        .total-box-custom td {
+            border: none;
+            padding: 8px 10px;
+        }
+
+        .total-box-custom th {
+            text-align: left;
+            font-weight: normal;
+            background: none;
+        }
+
+        .total-box-custom td {
+            text-align: right;
+            font-weight: bold;
+        }
+
+        .due-row td,
+        .due-row th {
+            background-color: #f7f7ff;
+            color: #dc3545;
+            border-top: 1px solid #007bff;
+            font-weight: bold !important;
+            font-size: 1.1em;
+        }
+
+        .amount-in-word-section {
+            margin-top: 15px;
+            font-size: 1.05em;
+        }
+
+        /* Bank Info */
+        .bank-section-custom {
+            margin-top: 40px;
+            border-top: 1px solid #eee;
             padding-top: 15px;
-            border-top: 1px dashed #ccc;
+        }
+
+        .bank-section-custom h4 {
+            color: #555;
+            margin-bottom: 10px;
+            font-size: 1.1em;
+        }
+
+        .bank-item-detail {
+            margin-bottom: 8px;
+            font-size: 0.9em;
+            line-height: 1.4;
+            border-left: 3px solid #007bff;
+            padding-left: 10px;
+        }
+
+        /* Footer */
+        .software-note {
+            position: absolute;
+            bottom: 10mm;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.7em;
+            color: #999;
+            text-align: center;
         }
 
         <?php endif; ?>
@@ -369,127 +511,188 @@ if ($is_post) {
 
 <body>
 
-    <?php if ($is_post): ?>
+    <?php if ($show_preview): ?>
 
         <div class="container">
             <div class="json-save-message" style="text-align: center; margin-bottom: 15px;">
                 <?php echo $json_save_message; ?>
             </div>
 
-            <div class="action-buttons">
+            <!-- <div class="action-buttons">
                 <button onclick="window.print()" style="background-color: #007bff;">🖨️ Print / Save as PDF</button>
+                <?php if (!empty($json_file_path)): ?>
+                    <a href="<?php echo htmlspecialchars($json_file_path); ?>" class="json-download" download>⬇️ Download
+                        JSON</a>
+                <?php endif; ?>
+                <button onclick="window.location.href = window.location.href.split('?')[0];"
+                    style="background-color: #555;">⬅️ Go Back to Form</button>
+            </div> -->
+
+            <div class="action-buttons">
+                <?php
+                // নিশ্চিত করুন যে $form_data['invoice_no'] সেট করা আছে
+                $current_invoice_no = $form_data['invoice_no'] ?? 'example_invoice';
+                ?>
+
+                <a href="download_invoice.php?invoice=<?php echo htmlspecialchars($current_invoice_no); ?>"
+                    target="_blank"
+                    style="background-color: #dc3545; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-weight: bold; display: inline-block; margin-right: 10px;">
+                    ⬇️ mPDF-এ PDF ডাউনলোড করুন
+                </a>
+
+                <button onclick="window.print()" style="background-color: #007bff;">🖨️ প্রিন্ট/সেভ করুন</button>
+
                 <?php if (!empty($json_file_path)): ?>
                     <a href="<?php echo htmlspecialchars($json_file_path); ?>" class="json-download" download>⬇️ Download JSON</a>
                 <?php endif; ?>
-                <button onclick="window.location.href = window.location.href.split('?')[0];" style="background-color: #555;">⬅️ Go Back to Form</button>
+                <button onclick="window.location.href = window.location.href.split('?')[0];" style="background-color: #555;">⬅️ ফর্মে ফিরে যান</button>
             </div>
 
             <div class="invoice-page">
 
-                <h1>INVOICE</h1>
-
-                <div class="invoice-header">
-                    <div class="vendor-info">
-                        <?php
-                        $logo_file = $form_data['vendor_logo'] ?? 'No File Selected';
-                        if ($logo_file !== 'No File Selected' && file_exists('uploads/' . $logo_file)):
-                        ?>
-                            <img src="uploads/<?php echo htmlspecialchars($logo_file); ?>" alt="Vendor Logo" style="max-width: 150px; height: auto; margin-bottom: 10px;"><br>
-                        <?php else: ?>
-                            <p><strong>[Logo File: <?php echo htmlspecialchars($logo_file); ?>]</strong></p>
-                        <?php endif; ?>
-
-                        <h2><?php echo htmlspecialchars($form_data['vendor_title'] ?? 'N/A'); ?></h2>
-                        <p>Address: <?php echo htmlspecialchars($form_data['vendor_address'] ?? 'N/A'); ?></p>
-                        <p>Phone: <?php echo htmlspecialchars($form_data['vendor_phone_no'] ?? 'N/A'); ?></p>
-                    </div>
-                    <div class="invoice-meta">
-                        <p><strong>Invoice No:</strong> <?php echo htmlspecialchars($form_data['invoice_no'] ?? 'N/A'); ?></p>
-                        <p><strong>Date:</strong> <?php echo htmlspecialchars($form_data['date'] ?? 'N/A'); ?></p>
-                    </div>
-                    <div class="clear"></div>
-                </div>
-
-                <hr>
-
-                <div class="invoice-details">
-                    <h3>Bill To:</h3>
-                    <p><strong>Client:</strong> <?php echo htmlspecialchars($form_data['client_title'] ?? 'N/A'); ?></p>
-                    <p><strong>Address:</strong> <?php echo htmlspecialchars($form_data['client_address'] ?? 'N/A'); ?></p>
-                    <p><strong>Phone:</strong> <?php echo htmlspecialchars($form_data['client_phone_no'] ?? 'N/A'); ?></p>
-                    <?php if (!empty($form_data['client_cc'])): ?>
-                        <p><strong>CC:</strong> <?php echo htmlspecialchars($form_data['client_cc']); ?></p>
-                    <?php endif; ?>
-                </div>
-
-                <div class="work-items-table">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th style="width: 5%;">#</th>
-                                <th style="width: 45%;">Work Title / Particular</th>
-                                <th class="text-right" style="width: 10%;">Qty</th>
-                                <th class="text-right" style="width: 20%;">Rate</th>
-                                <th class="text-right" style="width: 20%;">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody>
+                <table style="width: 100%">
+                    <tr>
+                        <td colspan="3" style="text-align: right;">
+                            <h1 style="margin: 0px !important;">INVOICE</h1>
+                        </td>
+                    </tr>
+                    <tr style="font-size: 12px;">
+                        <td style="width: 15%">
                             <?php
-                            $i = 1;
-                            foreach ($form_data['work_items'] as $item):
+                            $logo_file = $form_data['vendor_logo'] ?? 'No File Selected';
+                            if ($logo_file !== 'No File Selected' && file_exists('uploads/' . $logo_file)):
                             ?>
-                                <tr>
-                                    <td><?php echo $i++; ?></td>
-                                    <td>
-                                        <strong><?php echo htmlspecialchars($item['work_title']); ?></strong>
-                                        <br><small><?php echo nl2br(htmlspecialchars($item['work_particular'])); ?></small>
-                                    </td>
-                                    <td class="text-right"><?php echo htmlspecialchars($item['work_qty']); ?></td>
-                                    <td class="text-right"><?php echo htmlspecialchars(number_format($item['work_rate'], 2)); ?></td>
-                                    <td class="text-right"><?php echo htmlspecialchars(number_format($item['amount'], 2)); ?></td>
-                                </tr>
-                            <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
+                                <img src="uploads/<?php echo htmlspecialchars($logo_file); ?>" width="80" alt="Vendor Logo">
+                            <?php endif; ?>
+                        </td>
+                        <td style="width: 30%">
+                            <span style="display:block; font-weight:bold; margin:5px 0;">
+                                <?php echo htmlspecialchars($form_data['vendor_title'] ?? 'N/A'); ?>
+                            </span>
+                            <span>
+                                <?php echo htmlspecialchars($form_data['vendor_address'] ?? 'N/A'); ?>
+                            </span>
+                            <span style="display: block; margin:5px 0;">Phone: <?php echo htmlspecialchars($form_data['vendor_phone_no'] ?? 'N/A'); ?></span>
+                        </td>
+                        <td style="width: 55%; text-align: right; vertical-align: top;">
+                            <span style="display: block;"><?php echo htmlspecialchars($form_data['invoice_no'] ?? 'N/A'); ?></span>
+                            <span style="display: block;"><strong>Date:</strong> <?php echo htmlspecialchars($form_data['date'] ?? 'N/A'); ?></span>
+                        </td>
+                    </tr>
+                </table>
 
-                <div class="invoice-total">
-                    <div style="float: right; width: 40%; margin-top: 20px;">
-                        <div class="total-box">
-                            <p><strong>Total Amount:</strong> <span style="float: right;"><?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0, 2)); ?></span></p>
-                            <p><strong>Paid Amount:</strong> <span style="float: right;"><?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0, 2)); ?></span></p>
-                            <hr>
-                            <p style="font-size: 1.1em; color: #dc3545;"><strong>Due Amount:</strong> <span style="float: right;"><?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0, 2)); ?></span></p>
-                        </div>
-                    </div>
-                    <div style="float: left; width: 55%; margin-top: 20px;">
-                        <p><strong>Amount in Word:</strong> <?php echo htmlspecialchars($form_data['amount_in_word'] ?? 'N/A'); ?></p>
-                    </div>
-                    <div class="clear"></div>
-                </div>
+                <table style="width: 100%; font-size: 12px; margin-top: 15px;">
+                    <tr>
+                        <td style="width: 45%">
+                            <h3 style="margin: 5px 0px !important;">Bill To:</h3>
+                            <span style="display: block;"><?php echo htmlspecialchars($form_data['client_title'] ?? 'N/A'); ?></span>
+                            <span style="display: block;"><?php echo htmlspecialchars($form_data['client_address'] ?? 'N/A'); ?>
+                            </span>
+                            <?php if (!empty($form_data['client_cc'])): ?>
+                                <span style="display: block;">CC: <?php echo htmlspecialchars($form_data['client_cc']); ?></span>
+                            <?php endif; ?>
+                            <span style="display: block;"><?php echo htmlspecialchars($form_data['client_phone_no'] ?? 'N/A'); ?></span>
+                        </td>
+                        <td style="width: 55%"></td>
+                    </tr>
+                </table>
 
-                <div class="bank-section">
-                    <h4>Payment Details</h4>
+                <table style="width: 100%; font-size: 12px; margin-top: 15px; border-collapse: collapse;">
+                    <thead style="background-color: #dedede">
+                        <tr>
+                            <th style="width: 48%; padding: 6px; text-align: left;">Item</th>
+                            <th style="width: 15%; padding: 6px; text-align: center;">Quantity</th>
+                            <th style="width: 20%; padding: 6px; text-align: right;">Rate</th>
+                            <th style="width: 37%; padding: 6px; text-align: right;">Amount</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($form_data['work_items'] as $item): ?>
+                            <tr>
+                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; vertical-align: top;">
+                                    <strong><?php echo htmlspecialchars($item['work_title']); ?></strong><br>
+                                    <small style="color: #666;">
+                                        <?php echo nl2br(htmlspecialchars($item['work_particular'])); ?>
+                                    </small>
+                                </td>
+                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: center;">
+                                    <?php echo htmlspecialchars($item['work_qty']); ?>
+                                </td>
+                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: right;">
+                                    <strong><?php echo htmlspecialchars(number_format($item['work_rate'], 2)); ?></strong>
+                                </td>
+                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: right;">
+                                    <strong><?php echo htmlspecialchars(number_format($item['amount'], 2)); ?></strong>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <tr>
+                            <td colspan="2"></td>
+                            <th style="display: block; margin: 5px 0px;"><strong>Total Amount:</strong></th>
+                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0, 2)); ?></strong>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"></td>
+                            <th style="display: block; margin: 5px 0px;"><strong>Paid Amount:</strong></th>
+                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0, 2)); ?></strong>
+                            </td>
+                        </tr>
+                        <tr>
+                            <td colspan="2"></td>
+                            <th style="display: block; padding: 5px 0px; background-color: #f5f5f5;"><strong>Balance Due:</strong></th>
+                            <td style="background-color: #f5f5f5;"><strong>BDT <?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0, 2)); ?></strong>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <table style="width: 100%; margin-top: 5px; font-size: 12px">
+                    <tr>
+                        <td style="width: 100%">In Word: <?php echo htmlspecialchars($form_data['amount_in_word'] ?? 'N/A'); ?></td>
+                    </tr>
+                </table>
+
+                <table style="width: 100%; font-size: 12px; margin-top: 20px;">
+                    <tr>
+                        <td style="width: 100%;"><strong>Bank Info:</strong></td>
+                    </tr>
                     <?php foreach ($form_data['bank_items'] as $item): ?>
                         <?php if (!empty($item['vendor_bank']) || !empty($item['vendor_mfs_title'])): ?>
-                            <div style="margin-bottom: 10px; border: 1px dotted #ccc; padding: 5px;">
-                                <?php if (!empty($item['vendor_bank'])): ?>
-                                    <p>Bank: <strong><?php echo htmlspecialchars($item['vendor_bank']); ?></strong>, A/C: <?php echo htmlspecialchars($item['vendor_bank_account']); ?>, Branch: <?php echo htmlspecialchars($item['vendor_bank_branch']); ?></p>
-                                <?php endif; ?>
-                                <?php if (!empty($item['vendor_mfs_title'])): ?>
-                                    <p>MFS: <strong><?php echo htmlspecialchars($item['vendor_mfs_title']); ?></strong> (<?php echo htmlspecialchars($item['vendor_mfs_type']); ?>), A/C: <?php echo htmlspecialchars($item['vendor_mfs_account']); ?></p>
-                                <?php endif; ?>
-                                <?php if (!empty($item['vendor_amount_note'])): ?>
-                                    <small>Note: <?php echo htmlspecialchars($item['vendor_amount_note']); ?></small>
-                                <?php endif; ?>
-                            </div>
+                            <tr>
+                                <td>
+                                    <?php if (!empty($item['vendor_bank'])): ?>
+                                        <span><strong>Bank:</strong> <?php echo htmlspecialchars($item['vendor_bank']); ?> | A/C:
+                                            <?php echo htmlspecialchars($item['vendor_bank_account']); ?> | Branch:
+                                            <?php echo htmlspecialchars($item['vendor_bank_branch']); ?> | Routing:
+                                            <?php echo htmlspecialchars($item['vendor_bank_routing']); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <?php if (!empty($item['vendor_mfs_title'])): ?>
+                                        <span><strong>MFS:</strong> <?php echo htmlspecialchars($item['vendor_mfs_title']); ?>
+                                            (<?php echo htmlspecialchars($item['vendor_mfs_type']); ?>) | Account:
+                                            <?php echo htmlspecialchars($item['vendor_mfs_account']); ?>
+                                        </span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <?php if (!empty($item['vendor_amount_note'])): ?>
+                                        <span>Note: <?php echo htmlspecialchars($item['vendor_amount_note']); ?></span>
+                                    <?php endif; ?>
+                                </td>
+                            </tr>
                         <?php endif; ?>
                     <?php endforeach; ?>
-                </div>
+                </table>
 
-                <div style="margin-top: 60px; text-align: right;">
-                    <p>_________________________</p>
-                    <p>Authorized Signature</p>
+                <div class="software-note">
+                    ---This is a software-generated invoice. No need for a sign and seal.---
                 </div>
             </div>
         </div>
@@ -500,12 +703,16 @@ if ($is_post) {
             <h2>📋 ইনভয়েস ডেটা এন্ট্রি ফর্ম</h2>
 
             <div class="load-json-container">
-                <label for="json_file_name" style="font-weight: normal; display: inline;">JSON ফাইল থেকে ডেটা লোড করুন:</label>
-                <input type="text" id="json_file_name" placeholder="invoices/INV-1234567890.json" value="invoices/example_invoice.json">
+                <?php echo $json_save_message; ?>
+                <label for="json_file_name" style="font-weight: normal; display: inline;">JSON ফাইল থেকে ডেটা লোড
+                    করুন:</label>
+                <input type="text" id="json_file_name" placeholder="invoices/INV-1234567890.json"
+                    value="invoices/example_invoice.json">
                 <button onclick="loadJsonData()" class="form-btn">💾 লোড ডেটা</button>
             </div>
 
-            <form id="invoiceForm" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>" enctype="multipart/form-data">
+            <form id="invoiceForm" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>"
+                enctype="multipart/form-data">
 
                 <div class="section-header">ভেন্ডর তথ্য</div>
                 <div class="grid-3">
@@ -568,11 +775,13 @@ if ($is_post) {
                             </div>
                             <div>
                                 <label for="work_qty_0">পরিমাণ (work_qty)</label>
-                                <input type="number" id="work_qty_0" name="work_qty[]" min="1" value="1" required oninput="calculateAmount(0)">
+                                <input type="number" id="work_qty_0" name="work_qty[]" min="1" value="1" required
+                                    oninput="calculateAmount(0)">
                             </div>
                             <div>
                                 <label for="work_rate_0">হার (work_rate)</label>
-                                <input type="number" id="work_rate_0" name="work_rate[]" min="0" value="0" required oninput="calculateAmount(0)">
+                                <input type="number" id="work_rate_0" name="work_rate[]" min="0" value="0" required
+                                    oninput="calculateAmount(0)">
                             </div>
                         </div>
                         <label for="work_particular_0">বিস্তারিত বিবরণ (work_particular)</label>
@@ -597,7 +806,8 @@ if ($is_post) {
                     </div>
                     <div>
                         <label for="paid_amount">পরিশোধিত পরিমাণ (paid_amount)</label>
-                        <input type="number" id="paid_amount" name="paid_amount" min="0" value="0" oninput="calculateDueAmount()" required>
+                        <input type="number" id="paid_amount" name="paid_amount" min="0" value="0"
+                            oninput="calculateDueAmount()" required>
                     </div>
                     <div>
                         <label>বাকি পরিমাণ (due_amount)</label>
@@ -658,7 +868,7 @@ if ($is_post) {
             let workItemCount = 1;
             let bankItemCount = 1;
 
-            // --- কমন ফর্ম ফাংশন ---
+            // --- কমন ফর্ম ফাংশন (unchanged) ---
 
             function getWorkItemHtml(index) {
                 return `
@@ -756,7 +966,7 @@ if ($is_post) {
                 document.getElementById('due_amount').value = due;
             }
 
-            // --- JSON লোডিং ফাংশন ---
+            // --- JSON লোডিং ফাংশন (unchanged) ---
 
             async function loadJsonData() {
                 const filename = document.getElementById('json_file_name').value.trim();
@@ -797,31 +1007,28 @@ if ($is_post) {
                         logoPreview.innerHTML = ``;
                     }
 
-                    // ২. কাজের আইটেমগুলো (work_items) পূরণ করা (বাগ ফিক্সড)
+                    // ২. কাজের আইটেমগুলো (work_items) পূরণ করা
                     if (data.work_items && Array.isArray(data.work_items)) {
                         data.work_items.forEach((item, index) => {
-                            // যদি প্রথম আইটেম হয়, ডিফল্ট আইটেম (index 0) ম্যানুয়ালি যোগ করে নিই
                             if (index === 0) {
                                 document.getElementById('work_items').innerHTML = `<div class="work-item" data-index="0">${getWorkItemHtml(0)}</div>`;
                             } else {
                                 addWorkItem();
                             }
-                            const current_index = index; // যেহেতু আমরা ম্যানুয়ালি বা addWorkItem() দিয়ে index ঠিক রাখছি
+                            const current_index = index;
 
                             document.getElementById(`work_title_${current_index}`).value = item.work_title || '';
                             document.getElementById(`work_particular_${current_index}`).value = item.work_particular || '';
                             document.getElementById(`work_qty_${current_index}`).value = item.work_qty || 0;
                             document.getElementById(`work_rate_${current_index}`).value = item.work_rate || 0;
 
-                            // Amount ক্যালকুলেট করুন (যা সাথে সাথে টোটালও আপডেট করবে)
                             calculateAmount(current_index);
                         });
                     }
 
-                    // ৩. ব্যাংক আইটেমগুলো (bank_items) পূরণ করা (বাগ ফিক্সড)
+                    // ৩. ব্যাংক আইটেমগুলো (bank_items) পূরণ করা
                     if (data.bank_items && Array.isArray(data.bank_items)) {
                         data.bank_items.forEach((item, index) => {
-                            // যদি প্রথম আইটেম হয়, ডিফল্ট আইটেম (index 0) ম্যানুয়ালি যোগ করে নিই
                             if (index === 0) {
                                 document.getElementById('vendor_bank_details').innerHTML = `<div class="bank-item" data-index="0">${getBankItemHtml(0)}</div>`;
                             } else {
@@ -854,14 +1061,16 @@ if ($is_post) {
 
             // প্রাথমিক লোডের সময় ক্যালকুলেশন
             document.addEventListener('DOMContentLoaded', () => {
-                // নিশ্চিত করা যে লোড হওয়ার আগে অন্তত একটি আইটেম আছে
-                if (document.getElementById('work_items').children.length === 0) {
-                    document.getElementById('work_items').innerHTML = `<div class="work-item" data-index="0">${getWorkItemHtml(0)}</div>`;
+                // শুধুমাত্র ফর্মে গেলে ইনিশিয়ালাইজ করা হবে
+                if (document.querySelector('.form-container')) {
+                    if (document.getElementById('work_items').children.length === 0) {
+                        document.getElementById('work_items').innerHTML = `<div class="work-item" data-index="0">${getWorkItemHtml(0)}</div>`;
+                    }
+                    if (document.getElementById('vendor_bank_details').children.length === 0) {
+                        document.getElementById('vendor_bank_details').innerHTML = `<div class="bank-item" data-index="0">${getBankItemHtml(0)}</div>`;
+                    }
+                    calculateTotalAmount();
                 }
-                if (document.getElementById('vendor_bank_details').children.length === 0) {
-                    document.getElementById('vendor_bank_details').innerHTML = `<div class="bank-item" data-index="0">${getBankItemHtml(0)}</div>`;
-                }
-                calculateTotalAmount();
             });
         </script>
     <?php endif; ?>
