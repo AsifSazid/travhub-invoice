@@ -1,0 +1,37 @@
+{
+    "vendor_title": "TravHub Global Limited",
+    "vendor_phone_no": "+8801611482773",
+    "vendor_address": "House 12, Road 21, Sector 04, Uttara Model Town, Dhaka-1230",
+    "invoice_no": "# IF-OCT234",
+    "date": "2025-11-12",
+    "client_title": "Dekko Isho Group",
+    "client_phone_no": "+8801841296791",
+    "client_cc": "Pintu Ranjan Bhowmik",
+    "client_address": "187, The Forum, Shanta Western Tower, Level 16-19, Tejgaon, Dhaka-1208",
+    "total_amount": "18600.00",
+    "paid_amount": "0",
+    "due_amount": "18600.00",
+    "amount_in_word": "Eighteen Thousand Six Hundred Taka Only",
+    "vendor_logo": "__IF-OCT234.png",
+    "work_items": [
+        {
+            "work_title": "Cebu - Dhaka -Cebu Date Change",
+            "work_particular": "Arnel Quino Tarona New Dt: 23 Nov 25",
+            "work_qty": 1,
+            "work_rate": 18600,
+            "amount": 18600
+        }
+    ],
+    "bank_items": [
+        {
+            "vendor_bank": "DBBL",
+            "vendor_bank_account": "2021100019475",
+            "vendor_bank_branch": "Ashkona (Dhaka North)",
+            "vendor_bank_routing": "090260205",
+            "vendor_mfs_title": "bkash",
+            "vendor_mfs_type": "Personal",
+            "vendor_mfs_account": "01611482773",
+            "vendor_amount_note": "Please pay BDT 18879 in case of bkash payment"
+        }
+    ]
+}
