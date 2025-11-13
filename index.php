@@ -696,29 +696,29 @@ if ($is_post) {
                                     <?php echo htmlspecialchars($item['work_qty']); ?>
                                 </td>
                                 <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: right;">
-                                    <strong><?php echo htmlspecialchars(number_format($item['work_rate'], 2)); ?></strong>
+                                    <strong><?php echo htmlspecialchars(number_format($item['work_rate'])); ?></strong>
                                 </td>
                                 <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: right;">
-                                    <strong><?php echo htmlspecialchars(number_format($item['amount'], 2)); ?></strong>
+                                    <strong><?php echo htmlspecialchars(number_format($item['amount'])); ?></strong>
                                 </td>
                             </tr>
                         <?php endforeach; ?>
                         <tr>
                             <td colspan="2"></td>
                             <th style="display: block; margin: 5px 0px;"><strong>Total Amount:</strong></th>
-                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0, 2)); ?></strong>
+                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0)); ?></strong>
                             </td>
                         </tr>
                         <tr>
                             <td colspan="2"></td>
                             <th style="display: block; margin: 5px 0px;"><strong>Paid Amount:</strong></th>
-                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0, 2)); ?></strong>
+                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0)); ?></strong>
                             </td>
                         </tr>
                         <tr>
                             <td colspan="2"></td>
                             <th style="display: block; padding: 5px 0px; background-color: #f5f5f5;"><strong>Balance Due:</strong></th>
-                            <td style="background-color: #f5f5f5;"><strong>BDT <?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0, 2)); ?></strong>
+                            <td style="background-color: #f5f5f5;"><strong>BDT <?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0)); ?></strong>
                             </td>
                         </tr>
                     </tbody>

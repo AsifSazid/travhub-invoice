@@ -44,7 +44,7 @@ ob_start();
             footer: page-footer;
             margin-top: 180px;
             /* এখানে বাড়াও যতক্ষণ না কনটেন্ট ঠিকভাবে নিচে নামে */
-            margin-bottom: 50px;
+            margin-bottom: 80px;
         }
 
         table {
@@ -219,13 +219,13 @@ ob_start();
             <tbody>
                 <?php foreach ($form_data['work_items'] as $item): ?>
                     <tr>
-                        <td style="padding: 10px 5px;">
+                        <td style="padding: 10px 5px; border-bottom: 1px solid #d4d4d4;">
                             <strong><?php echo htmlspecialchars($item['work_title']); ?></strong><br>
                             <small><?php echo nl2br(htmlspecialchars($item['work_particular'])); ?></small>
                         </td>
-                        <td style="text-align: center;"><?php echo htmlspecialchars($item['work_qty']); ?></td>
-                        <td style="text-align: right;"><?php echo htmlspecialchars(number_format($item['work_rate'])); ?></td>
-                        <td style="text-align: right;"><?php echo htmlspecialchars(number_format($item['work_qty'] * $item['work_rate'])); ?></td>
+                        <td style="text-align: center; border-bottom: 1px solid #d4d4d4;"><?php echo htmlspecialchars($item['work_qty']); ?></td>
+                        <td style="text-align: right; border-bottom: 1px solid #d4d4d4;"><?php echo htmlspecialchars(number_format($item['work_rate'])); ?></td>
+                        <td style="text-align: right; border-bottom: 1px solid #d4d4d4;"><?php echo htmlspecialchars(number_format($item['work_qty'] * $item['work_rate'])); ?></td>
                     </tr>
                 <?php endforeach; ?>
                 <tr>
