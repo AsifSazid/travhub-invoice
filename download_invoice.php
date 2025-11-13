@@ -148,6 +148,11 @@ ob_start();
             <tr>
                 <td style="border:none;">---This is a software-generated invoice. No need for a sign and seal.---</td>
             </tr>
+            <tr>
+                <td style="text-align:right; border:none;">
+                    Page {PAGENO} of {nbpg}
+                </td>
+            </tr>
         </table>
     </htmlpagefooter>
 
@@ -219,25 +224,24 @@ ob_start();
                             <small><?php echo nl2br(htmlspecialchars($item['work_particular'])); ?></small>
                         </td>
                         <td style="text-align: center;"><?php echo htmlspecialchars($item['work_qty']); ?></td>
-                        <td style="text-align: right;"><?php echo htmlspecialchars(number_format($item['work_rate'], 2)); ?></td>
-                        <td style="text-align: right;"><?php echo htmlspecialchars(number_format($item['amount'], 2)); ?></td>
+                        <td style="text-align: right;"><?php echo htmlspecialchars(number_format($item['work_rate'])); ?></td>
+                        <td style="text-align: right;"><?php echo htmlspecialchars(number_format($item['work_qty'] * $item['work_rate'])); ?></td>
                     </tr>
                 <?php endforeach; ?>
-
                 <tr>
                     <td colspan="2"></td>
-                    <th style="text-align: left; padding: 5px 0px 5px 5px;">Total Amount:</th>
-                    <td style="padding-left: 5px;">BDT <?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0, 2)); ?></td>
+                    <th style="text-align: right; padding: 5px 0px 5px 5px;">Total Amount:</th>
+                    <td style="padding-left: 5px; text-align: right;">BDT <?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0)); ?></td>
                 </tr>
                 <tr>
                     <td colspan="2"></td>
-                    <th style="text-align: left; padding: 5px 0px 5px 5px;">Paid Amount:</th>
-                    <td style="padding-left: 5px;">BDT <?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0, 2)); ?></td>
+                    <th style="text-align: right; padding: 5px 0px 5px 5px;">Paid Amount:</th>
+                    <td style="padding-left: 5px; text-align: right;">BDT <?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0)); ?></td>
                 </tr>
                 <tr>
                     <td colspan="2"></td>
-                    <th style="background-color: #f5f5f5; text-align: left; padding: 5px 0px 5px 5px;" class="sub-title">Balance Due:</th>
-                    <td style="background-color: #f5f5f5; padding-left: 8px;" class="sub-title">BDT <?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0, 2)); ?></td>
+                    <th style="background-color: #f5f5f5; text-align: right; padding: 5px 0px 5px 5px;" class="sub-title">Balance Due:</th>
+                    <td style="background-color: #f5f5f5; padding-left: 8px; text-align: right;" class="sub-title">BDT <?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0)); ?></td>
                 </tr>
             </tbody>
         </table>
