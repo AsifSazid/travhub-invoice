@@ -163,7 +163,7 @@ ob_start();
                     <?php
                     // Address Line 1
                     if (!empty($form_data['client_address_line_01'])) {
-                        echo '<span style="display:block;">' . htmlspecialchars($form_data['client_address_line_01']) . '</span>';
+                        echo '<div style="display:block;">' . htmlspecialchars($form_data['client_address_line_01']) . '</div>';
                     }
 
                     // Address Line 2 (with comma only if next value exists)
