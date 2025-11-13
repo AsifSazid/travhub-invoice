@@ -155,13 +155,25 @@ if ($is_post) {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ইনভয়েস ডেটা এন্ট্রি এবং প্রিভিউ</title>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
     <style>
         /* Shared Styles */
         body {
-            font-family: 'Arial', sans-serif;
+            font-family: 'Poppins', sans-serif;
             background-color: #f4f4f9;
             color: #333;
             padding: 20px;
+            font-size: 10px !important;
+        }
+
+        .title {
+            font-size: 25px !important;
+            font-weight: 800 !important;
+        }
+
+        .sub-title {
+            font-size: 15px !important;
+            font-weight: 600 !important;
         }
 
         .container {
@@ -553,7 +565,7 @@ if ($is_post) {
                 <table style="width: 100%">
                     <tr>
                         <td colspan="3" style="text-align: right;">
-                            <h1 style="margin: 0px !important;">INVOICE</h1>
+                            <h1 style="margin: 0px !important;" class="title">INVOICE</h1>
                         </td>
                     </tr>
                     <tr style="font-size: 12px;">
@@ -566,14 +578,48 @@ if ($is_post) {
                             <?php endif; ?>
                         </td>
                         <td style="width: 30%">
-                            <span style="display:block; font-weight:bold; margin:5px 0;">
+                            <span style="display:block;" class="sub-title">
                                 <?php echo htmlspecialchars($form_data['vendor_title'] ?? 'N/A'); ?>
                             </span>
-                            <span>
-                                <?php echo htmlspecialchars($form_data['vendor_address'] ?? 'N/A'); ?>
+
+                            <?php
+                            // Address Line 1
+                            if (!empty($form_data['vendor_address_line_01'])) {
+                                echo '<span style="display:block;">' . htmlspecialchars($form_data['vendor_address_line_01']) . '</span>';
+                            }
+
+                            // Address Line 2 (with comma only if next value exists)
+                            if (!empty($form_data['vendor_address_line_02'])) {
+                                echo '<span>';
+                                echo htmlspecialchars($form_data['vendor_address_line_02']);
+                                // Add comma only if city or postal code exists
+                                if (!empty($form_data['vendor_address_city']) || !empty($form_data['vendor_address_postal_code'])) {
+                                    echo ', ';
+                                }
+                                echo '</span>';
+                            }
+
+                            // City & Postal Code (with hyphen only if postal code exists)
+                            if (!empty($form_data['vendor_address_city']) || !empty($form_data['vendor_address_postal_code'])) {
+                                echo '<span>';
+                                if (!empty($form_data['vendor_address_city'])) {
+                                    echo htmlspecialchars($form_data['vendor_address_city']);
+                                }
+                                if (!empty($form_data['vendor_address_city']) && !empty($form_data['vendor_address_postal_code'])) {
+                                    echo '-';
+                                }
+                                if (!empty($form_data['vendor_address_postal_code'])) {
+                                    echo htmlspecialchars($form_data['vendor_address_postal_code']);
+                                }
+                                echo '</span>';
+                            }
+                            ?>
+
+                            <span style="display: block;">
+                                Phone: <?php echo htmlspecialchars($form_data['vendor_phone_no'] ?? 'N/A'); ?>
                             </span>
-                            <span style="display: block; margin:5px 0;">Phone: <?php echo htmlspecialchars($form_data['vendor_phone_no'] ?? 'N/A'); ?></span>
                         </td>
+
                         <td style="width: 55%; text-align: right; vertical-align: top;">
                             <span style="display: block;"><?php echo htmlspecialchars($form_data['invoice_no'] ?? 'N/A'); ?></span>
                             <span style="display: block;"><strong>Date:</strong> <?php echo htmlspecialchars($form_data['date'] ?? 'N/A'); ?></span>
@@ -581,12 +627,43 @@ if ($is_post) {
                     </tr>
                 </table>
 
-                <table style="width: 100%; font-size: 12px; margin-top: 15px;">
+                <table style="width: 100%; margin-top: 15px;">
                     <tr>
                         <td style="width: 45%">
-                            <h3 style="margin: 5px 0px !important;">Bill To:</h3>
+                            <h3 style="margin: 5px 0px !important;" class="sub-title">Bill To:</h3>
                             <span style="display: block;"><?php echo htmlspecialchars($form_data['client_title'] ?? 'N/A'); ?></span>
-                            <span style="display: block;"><?php echo htmlspecialchars($form_data['client_address'] ?? 'N/A'); ?>
+                            <?php
+                            // Address Line 1
+                            if (!empty($form_data['client_address_line_01'])) {
+                                echo '<span style="display:block;">' . htmlspecialchars($form_data['client_address_line_01']) . '</span>';
+                            }
+
+                            // Address Line 2 (with comma only if next value exists)
+                            if (!empty($form_data['vendor_address_line_02'])) {
+                                echo '<span>';
+                                echo htmlspecialchars($form_data['client_address_line_02']);
+                                // Add comma only if city or postal code exists
+                                if (!empty($form_data['client_address_city']) || !empty($form_data['client_address_postal_code'])) {
+                                    echo ', ';
+                                }
+                                echo '</span>';
+                            }
+
+                            // City & Postal Code (with hyphen only if postal code exists)
+                            if (!empty($form_data['client_address_city']) || !empty($form_data['client_address_postal_code'])) {
+                                echo '<span>';
+                                if (!empty($form_data['client_address_city'])) {
+                                    echo htmlspecialchars($form_data['vendor_address_city']);
+                                }
+                                if (!empty($form_data['client_address_city']) && !empty($form_data['client_address_postal_code'])) {
+                                    echo '-';
+                                }
+                                if (!empty($form_data['client_address_postal_code'])) {
+                                    echo htmlspecialchars($form_data['client_address_postal_code']);
+                                }
+                                echo '</span>';
+                            }
+                            ?>
                             </span>
                             <?php if (!empty($form_data['client_cc'])): ?>
                                 <span style="display: block;">CC: <?php echo htmlspecialchars($form_data['client_cc']); ?></span>
@@ -597,7 +674,7 @@ if ($is_post) {
                     </tr>
                 </table>
 
-                <table style="width: 100%; font-size: 12px; margin-top: 15px; border-collapse: collapse;">
+                <table style="width: 100%; margin-top: 15px; border-collapse: collapse;">
                     <thead style="background-color: #dedede">
                         <tr>
                             <th style="width: 48%; padding: 6px; text-align: left;">Item</th>
@@ -610,7 +687,7 @@ if ($is_post) {
                         <?php foreach ($form_data['work_items'] as $item): ?>
                             <tr>
                                 <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; vertical-align: top;">
-                                    <strong><?php echo htmlspecialchars($item['work_title']); ?></strong><br>
+                                    <span class="sub-title"><strong><?php echo htmlspecialchars($item['work_title']); ?></strong></span><br>
                                     <small style="color: #666;">
                                         <?php echo nl2br(htmlspecialchars($item['work_particular'])); ?>
                                     </small>
@@ -653,16 +730,16 @@ if ($is_post) {
                     </tr>
                 </table>
 
-                <table style="width: 100%; font-size: 12px; margin-top: 20px;">
+                <table style="width: 100%; margin-top: 20px;">
                     <tr>
                         <td style="width: 100%;"><strong>Bank Info:</strong></td>
                     </tr>
                     <?php foreach ($form_data['bank_items'] as $item): ?>
-                        <?php if (!empty($item['vendor_bank']) || !empty($item['vendor_mfs_title'])): ?>
+                        <?php if (!empty($item['vendor_bank'])): ?>
                             <tr>
                                 <td>
                                     <?php if (!empty($item['vendor_bank'])): ?>
-                                        <span><strong>Bank:</strong> <?php echo htmlspecialchars($item['vendor_bank']); ?> | A/C:
+                                        <span><?php echo htmlspecialchars($item['vendor_bank']); ?> | A/C:
                                             <?php echo htmlspecialchars($item['vendor_bank_account']); ?> | Branch:
                                             <?php echo htmlspecialchars($item['vendor_bank_branch']); ?> | Routing:
                                             <?php echo htmlspecialchars($item['vendor_bank_routing']); ?>
@@ -670,12 +747,24 @@ if ($is_post) {
                                     <?php endif; ?>
                                 </td>
                             </tr>
+                        <?php endif; ?>
+                    <?php endforeach; ?>
+                    <?php foreach ($form_data['mfs_items'] as $item): ?>
+                        <?php if (!empty($item['vendor_mfs_title'])): ?>
                             <tr>
                                 <td>
                                     <?php if (!empty($item['vendor_mfs_title'])): ?>
-                                        <span><strong>MFS:</strong> <?php echo htmlspecialchars($item['vendor_mfs_title']); ?>
-                                            (<?php echo htmlspecialchars($item['vendor_mfs_type']); ?>) | Account:
-                                            <?php echo htmlspecialchars($item['vendor_mfs_account']); ?>
+                                        <span><?php echo htmlspecialchars($item['vendor_mfs_title']); ?> |
+                                            <?php echo htmlspecialchars($item['vendor_mfs_type']); ?> | Account:
+                                            <?php
+                                            $lastIndex = count($item['vendor_mfs_account']) - 1;
+                                            foreach ($item['vendor_mfs_account'] as $i => $vendorAcc):
+                                                echo htmlspecialchars($vendorAcc);
+                                                if ($i !== $lastIndex) {
+                                                    echo " | ";
+                                                }
+                                            endforeach;
+                                            ?>
                                         </span>
                                     <?php endif; ?>
                                 </td>

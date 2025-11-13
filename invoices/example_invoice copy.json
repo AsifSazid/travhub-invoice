@@ -1,19 +1,13 @@
 {
     "vendor_title": "TravHub Global Limited",
     "vendor_phone_no": "+8801611482773",
-    "vendor_address_line_01": "House 01, Road 06, Sector 03",
-    "vendor_address_line_02": "Uttara Model Town",
-    "vendor_address_city": "Dhaka",
-    "vendor_address_postal_code": "1230",
+    "vendor_address": "House 12, Road 21, Sector 04, Uttara Model Town, Dhaka-1230",
     "invoice_no": "# IF-OCT234",
     "date": "2025-11-12",
     "client_title": "Dekko Isho Group",
     "client_phone_no": "+8801841296791",
     "client_cc": "Pintu Ranjan Bhowmik",
-    "client_address_line_01": "187, The Forum, Shanta Western Tower",
-    "client_address_line_02": "Level 16-19, Tejgaon",
-    "client_address_city": "Dhaka",
-    "client_address_postal_code": "1208",
+    "client_address": "187, The Forum, Shanta Western Tower, Level 16-19, Tejgaon, Dhaka-1208",
     "total_amount": "18600.00",
     "paid_amount": "0",
     "due_amount": "18600.00",
@@ -33,14 +27,10 @@
             "vendor_bank": "DBBL",
             "vendor_bank_account": "2021100019475",
             "vendor_bank_branch": "Ashkona (Dhaka North)",
-            "vendor_bank_routing": "090260205"
-        }
-    ],
-    "mfs_items": [
-        {
+            "vendor_bank_routing": "090260205",
             "vendor_mfs_title": "bkash",
             "vendor_mfs_type": "Personal",
-            "vendor_mfs_account": ["01611482773", "01687867603"],
+            "vendor_mfs_account": "01611482773",
             "vendor_amount_note": "Please pay BDT 18879 in case of bkash payment"
         }
     ]
