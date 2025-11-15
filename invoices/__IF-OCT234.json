@@ -8,30 +8,37 @@
     "client_phone_no": "+8801841296791",
     "client_cc": "Pintu Ranjan Bhowmik",
     "client_address": "187, The Forum, Shanta Western Tower, Level 16-19, Tejgaon, Dhaka-1208",
-    "total_amount": "18600.00",
-    "paid_amount": "0",
-    "due_amount": "18600.00",
+    "total_amount": "31000.00",
+    "paid_amount": "15000",
+    "due_amount": "16000.00",
     "amount_in_word": "Eighteen Thousand Six Hundred Taka Only",
-    "vendor_logo": "fb2.png",
+    "vendor_logo": "__IF-OCT234.png",
     "work_items": [
         {
-            "work_title": "Cebu - Dhaka -Cebu Date Change",
+            "work_title": "Cebu - Dhaka - Cebu Date Change",
             "work_particular": "Arnel Quino Tarona New Dt: 23 Nov 25",
             "work_qty": 1,
             "work_rate": 18600,
             "amount": 18600
+        },
+        {
+            "work_title": "Cebu - Dhaka - Cebu Date Change -2",
+            "work_particular": "",
+            "work_qty": 1,
+            "work_rate": 12400,
+            "amount": 12400
         }
     ],
     "bank_items": [
         {
-            "vendor_bank": "DBBL",
-            "vendor_bank_account": "2021100019475",
-            "vendor_bank_branch": "Ashkona (Dhaka North)",
-            "vendor_bank_routing": "090260205",
-            "vendor_mfs_title": "bkash",
-            "vendor_mfs_type": "Personal",
-            "vendor_mfs_account": "01611482773",
-            "vendor_amount_note": "Please pay BDT 18879 in case of bkash payment"
+            "vendor_bank": "",
+            "vendor_bank_account": "",
+            "vendor_bank_branch": "",
+            "vendor_bank_routing": "",
+            "vendor_mfs_title": "",
+            "vendor_mfs_type": "",
+            "vendor_mfs_account": "",
+            "vendor_amount_note": ""
         }
     ]
 }
