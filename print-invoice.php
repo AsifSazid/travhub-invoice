@@ -1,7 +1,7 @@
 <?php
 // print-invoice.php
 require_once __DIR__ . '/vendor/autoload.php';
-require_once __DIR__ . '/db_connection.php';
+require __DIR__ . '/server/db_connection.php';
 
 session_start();
 
