@@ -1,1169 +1,1006 @@
 <?php
-// PHP কোড শুরু: এই ফাইলটি সার্ভার সাইডে চলতে হবে।
+require 'server/db_connection.php'; // your PDO connection
 
-// 1. ফাইল আপলোড ফাংশন
-function handleFileUpload($file, $invoice_no, &$form_data)
-{
-    $uploadDir = 'uploads/';
-    $filename = $file['name'];
-    $fileTmpName = $file['tmp_name'];
-    $fileExt = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-    $allowed = array('jpg', 'jpeg', 'png', 'gif');
+try {
+    // Load invoices from database
+    $stmt = $pdo->query("
+        SELECT * FROM invoices
+        ORDER BY created_at DESC
+    ");
 
-    if ($file['error'] === UPLOAD_ERR_OK && in_array($fileExt, $allowed)) {
-        if (!is_dir($uploadDir)) {
-            mkdir($uploadDir, 0777, true);
+    $invoices = [];
+
+    while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+        // Decode client_info JSON
+        $client_info = json_decode($row['client_info'], true);
+
+        // Calculate status based on paid_amount and due_amount
+        $status = 'pending';
+        if ($row['due_amount'] == 0) {
+            $status = 'paid';
+        } elseif ($row['paid_amount'] == 0) {
+            $status = 'pending';
+        } elseif ($row['due_amount'] > 0) {
+            // Check if invoice is overdue (for demo, we'll use 30 days from creation)
+            $created_date = new DateTime($row['created_at']);
+            $due_date = $created_date->modify('+30 days');
+            $now = new DateTime();
+
+            if ($now > $due_date) {
+                $status = 'overdue';
+            } else {
+                $status = 'pending';
+            }
         }
 
-        // ফাইলকে ইনভয়েস নম্বর দিয়ে রিনেম করা
-        $fileNameNew = preg_replace('/[^a-zA-Z0-9-]/', '_', $invoice_no) . '.' . $fileExt;
-        $fileDestination = $uploadDir . $fileNameNew;
+        // Decode work items
+        $work_items = json_decode($row['work_items'], true) ?: [];
 
-        if (move_uploaded_file($fileTmpName, $fileDestination)) {
-            $form_data['vendor_logo'] = $fileNameNew;
-            return true;
-        }
+        $invoices[] = [
+            "id" => $row['id'],
+            "invoice_no" => $row['invoice_no'],
+            "client_name" => $client_info['title'] ?? 'Unknown Client',
+            "client_email" => $client_info['cc'] ?? '',
+            "phone" => $client_info['phone_no'] ?? '',
+            "total_amount" => floatval($row['total_amount']),
+            "paid_amount" => floatval($row['paid_amount']),
+            "due_amount" => floatval($row['due_amount']),
+            "created_at" => $row['created_at'],
+            "updated_at" => $row['updated_at'],
+            "invoice_date" => $row['date'], // Use the date field from database
+            "due_date" => date('Y-m-d', strtotime($row['date'] . ' +30 days')), // Assuming 30-day payment term
+            "status" => $status,
+            "currency" => "BDT", // You can store this in database if needed
+            "description" => "Visa Application Services", // Default description or extract from work items
+            "amount" => floatval($row['total_amount']), // For compatibility with existing JS
+            "items" => array_map(function ($item) {
+                return [
+                    'description' => $item['title'] ?? 'Service',
+                    'quantity' => intval($item['qty'] ?? 1),
+                    'unit_price' => floatval($item['rate'] ?? 0),
+                    'total' => floatval($item['amount'] ?? 0)
+                ];
+            }, $work_items)
+        ];
     }
 
-    $form_data['vendor_logo'] = 'No File Selected'; // ফলব্যাক
-    return false;
-}
-
-// 2. ডেটা প্রসেসিং লজিক
-$is_post = ($_SERVER['REQUEST_METHOD'] === 'POST');
-$form_data = [];
-$json_save_message = '';
-$json_file_path = '';
-$dir = 'invoices/';
-$default_json_file = $dir . 'example_invoice.json';
-$show_preview = false; // নতুন ফ্ল্যাগ: কখন প্রিভিউ দেখাবো?
-
-if ($is_post) {
-    // === POST লজিক: ফর্ম সাবমিশন ও JSON সেভ ===
-    $form_data = $_POST;
-    $invoice_no = $form_data['invoice_no'] ?? 'INV-' . time();
-
-    // === ইমেজ আপলোড হ্যান্ডলিং ===
-    if (isset($_FILES['vendor_logo']) && $_FILES['vendor_logo']['error'] !== UPLOAD_ERR_NO_FILE) {
-        handleFileUpload($_FILES['vendor_logo'], $invoice_no, $form_data);
-    } else {
-        $form_data['vendor_logo'] = $form_data['existing_vendor_logo'] ?? 'No File Selected';
-    }
-
-    // কাজের আইটেমগুলোকে একটি স্ট্রাকচার্ড অ্যারেতে একত্রিত করা হচ্ছে
-    $work_items = [];
-    if (isset($form_data['work_title']) && is_array($form_data['work_title'])) {
-        $count = count($form_data['work_title']);
-        for ($i = 0; $i < $count; $i++) {
-            $work_items[] = [
-                'work_title' => $form_data['work_title'][$i] ?? '',
-                'work_particular' => $form_data['work_particular'][$i] ?? '',
-                'work_qty' => (float) ($form_data['work_qty'][$i] ?? 0),
-                'work_rate' => (float) ($form_data['work_rate'][$i] ?? 0),
-                'amount' => (float) ($form_data['amount'][$i] ?? 0),
-            ];
-        }
-    }
-    $form_data['work_items'] = $work_items;
-
-    // ব্যাংক আইটেমগুলোকেও একইভাবে স্ট্রাকচার্ড অ্যারেতে একত্রিত করা হচ্ছে
-    $bank_items = [];
-    if (isset($form_data['vendor_bank']) && is_array($form_data['vendor_bank'])) {
-        $count = count($form_data['vendor_bank']);
-        for ($i = 0; $i < $count; $i++) {
-            $bank_items[] = [
-                'vendor_bank' => $form_data['vendor_bank'][$i] ?? '',
-                'vendor_bank_account' => $form_data['vendor_bank_account'][$i] ?? '',
-                'vendor_bank_branch' => $form_data['vendor_bank_branch'][$i] ?? '',
-                'vendor_bank_routing' => $form_data['vendor_bank_routing'][$i] ?? '',
-                'vendor_mfs_title' => $form_data['vendor_mfs_title'][$i] ?? '',
-                'vendor_mfs_type' => $form_data['vendor_mfs_type'][$i] ?? '',
-                'vendor_mfs_account' => $form_data['vendor_mfs_account'][$i] ?? '',
-                'vendor_amount_note' => $form_data['vendor_amount_note'][$i] ?? '',
-            ];
-        }
-    }
-    $form_data['bank_items'] = $bank_items;
-
-    // অপ্রয়োজনীয় অ্যারে মুছে দেওয়া
-    $keys_to_unset = [
-        'work_title',
-        'work_particular',
-        'work_qty',
-        'work_rate',
-        'amount',
-        'vendor_bank',
-        'vendor_bank_account',
-        'vendor_bank_branch',
-        'vendor_bank_routing',
-        'vendor_mfs_title',
-        'vendor_mfs_type',
-        'vendor_mfs_account',
-        'vendor_amount_note',
-        'existing_vendor_logo'
-    ];
-    foreach ($keys_to_unset as $key) {
-        unset($form_data[$key]);
-    }
-
-    // JSON ফাইল সেভ করার লজিক
-    if (!is_dir($dir)) {
-        mkdir($dir, 0777, true);
-    }
-
-    $json_data_encoded = json_encode($form_data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE);
-    $filename_safe = preg_replace('/[^a-zA-Z0-9-]/', '_', $invoice_no);
-    $json_file_path = $dir . $filename_safe . '.json';
-
-    if (file_put_contents($json_file_path, $json_data_encoded) !== false) {
-        $json_save_message = '<p style="color: green; font-weight: bold;">✅ Success! Invoice data saved to file: <code>' . htmlspecialchars($json_file_path) . '</code></p>';
-    } else {
-        $json_save_message = '<p style="color: red; font-weight: bold;">❌ Error! Could not save JSON file. Check directory permissions (<code>' . htmlspecialchars($dir) . '</code>).</p>';
-    }
-
-    $show_preview = true; // POST হলে প্রিভিউ দেখাও
-
-} else {
-    // === GET লজিক: ডিফল্ট JSON লোড ও প্রিভিউ দেখাও ===
-    if (file_exists($default_json_file)) {
-        $json_content = @file_get_contents($default_json_file);
-
-        if ($json_content) {
-            $form_data = json_decode($json_content, true);
-        }
-
-        if ($form_data !== null && $form_data !== []) {
-            // ডেটা সফলভাবে লোড হয়েছে: প্রিভিউ দেখাও
-            $show_preview = true;
-            $json_file_path = $default_json_file; // ডাউনলোড লিংকের জন্য পাথ সেট
-            $json_save_message = '<p style="color: blue; font-weight: bold;">ⓘ Default Invoice Preview.</p>';
-        } else {
-            // JSON ফাইল ইনভ্যালিড/খালি: ফর্ম দেখাও
-            $json_save_message = '<p style="color: red; font-weight: bold;">❌ Error! Default JSON file is invalid or empty. Showing form.</p>';
-        }
-    } else {
-        // ফাইল পাওয়া যায়নি: ফর্ম দেখাও
-        $json_save_message = '<p style="color: orange; font-weight: bold;">⚠️ Warning: Default JSON file <code>' . htmlspecialchars($default_json_file) . '</code> not found. Showing empty form.</p>';
-    }
+    // var_dump($invoices); // Uncomment for debugging
+} catch (Exception $e) {
+    echo json_encode([
+        "status" => "error",
+        "message" => $e->getMessage()
+    ]);
+    exit;
 }
 ?>
 
 <!DOCTYPE html>
-<html lang="bn">
+<html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ইনভয়েস ডেটা এন্ট্রি এবং প্রিভিউ</title>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&display=swap" rel="stylesheet">
+    <title>Invoice Management Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
-        /* Shared Styles */
-        body {
-            font-family: 'Poppins', sans-serif;
-            background-color: #f4f4f9;
-            color: #333;
-            padding: 20px;
-            font-size: 10px !important;
+        .invoice-card {
+            transition: all 0.3s ease;
+            border-left: 5px solid transparent;
         }
 
-        .title {
-            font-size: 25px !important;
-            font-weight: 800 !important;
+        .invoice-card:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
         }
 
-        .sub-title {
-            font-size: 15px !important;
-            font-weight: 600 !important;
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
         }
 
-        .container {
-            max-width: 1000px;
-            margin: auto;
-            background: #fff;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(15px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
         }
 
-        .section-header {
-            background-color: #e9ecef;
-            padding: 10px;
-            border-radius: 4px;
-            margin-top: 20px;
-            margin-bottom: 15px;
-            font-weight: bold;
-            color: #007bff;
+        .status-badge {
+            font-size: 0.75rem;
+            padding: 0.35rem 0.85rem;
+            border-radius: 9999px;
+            font-weight: 600;
+            letter-spacing: 0.3px;
         }
 
-        /* Form Specific Styles */
-        <?php if (!$show_preview): ?>label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-
-        input[type="text"],
-        input[type="number"],
-        input[type="file"],
-        textarea,
-        input[type="date"] {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-
-        .grid-3 {
-            display: grid;
-            grid-template-columns: repeat(3, 1fr);
-            gap: 20px;
-        }
-
-        .grid-2 {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 20px;
-        }
-
-        button.form-btn {
-            background-color: #28a745;
+        .status-pending {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
             color: white;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 16px;
-            margin-top: 10px;
+            box-shadow: 0 2px 5px rgba(245, 158, 11, 0.2);
         }
 
-        .remove-btn {
-            background-color: #dc3545;
-            margin-left: 10px;
-            padding: 5px 10px;
+        .status-paid {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+            box-shadow: 0 2px 5px rgba(16, 185, 129, 0.2);
         }
 
-        .work-item,
-        .bank-item {
-            border: 1px dashed #ccc;
-            padding: 15px;
-            margin-bottom: 10px;
+        .status-overdue {
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: white;
+            box-shadow: 0 2px 5px rgba(239, 68, 68, 0.2);
         }
 
-        .load-json-container {
-            text-align: center;
-            padding: 15px;
-            border: 1px dashed #007bff;
-            margin-bottom: 20px;
-            border-radius: 8px;
+        .status-draft {
+            background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
+            color: white;
+            box-shadow: 0 2px 5px rgba(107, 114, 128, 0.2);
         }
 
-        .load-json-container input[type="text"] {
-            width: 300px;
-            display: inline-block;
-            margin-right: 10px;
+        .amount-badge {
+            font-size: 1rem;
+            padding: 0.5rem 1rem;
+            border-radius: 12px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);
+            color: white;
+            box-shadow: 0 2px 5px rgba(59, 130, 246, 0.2);
         }
 
-        .load-json-container button {
-            background-color: #007bff;
+        .action-btn {
+            transition: all 0.2s ease;
+            border: 1px solid transparent;
         }
 
-        .logo-preview {
-            margin-top: 5px;
-            font-size: 0.9em;
-            color: #6c757d;
+        .action-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
         }
 
-        <?php endif; ?>
-
-        /* A4 Invoice Preview Styles */
-        <?php if ($show_preview): ?>.container {
-            padding: 0;
-            background: none;
-            box-shadow: none;
-            max-width: 800px;
+        .invoice-type-badge {
+            font-size: 0.7rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-weight: 600;
         }
 
-        .invoice-page {
-            width: 210mm;
-            min-height: 297mm;
-            margin: 0 auto;
-            padding: 15mm;
-            background: white;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
-            box-sizing: border-box;
-            position: relative;
+        .type-visa {
+            background: linear-gradient(135deg, #dbeafe 0%, #bfdbfe 100%);
+            color: #1e40af;
+            border: 1px solid #93c5fd;
         }
 
-        .action-buttons {
-            margin-bottom: 15px;
-            text-align: center;
+        .type-ticket {
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            color: #0c4a6e;
+            border: 1px solid #7dd3fc;
         }
 
-        .action-buttons a.json-download {
-            background-color: #ffc107;
-            color: #333;
-            padding: 8px 15px;
-            border-radius: 4px;
-            text-decoration: none;
-            font-weight: bold;
-            display: inline-block;
-            margin-left: 10px;
+        .type-service {
+            background: linear-gradient(135deg, #f0fdf4 0%, #dcfce7 100%);
+            color: #166534;
+            border: 1px solid #86efac;
         }
 
-        /* Updated Design Styles */
-        .invoice-header-custom {
-            display: flex;
-            justify-content: space-between;
-            align-items: flex-start;
-            margin-bottom: 30px;
+        .type-other {
+            background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+            color: #92400e;
+            border: 1px solid #fcd34d;
         }
 
-        .vendor-logo-box {
-            flex-basis: 30%;
-        }
-
-        .vendor-logo-box img {
-            max-width: 100%;
-            height: auto;
-            max-height: 80px;
-        }
-
-        .invoice-title-meta {
-            flex-basis: 30%;
-            text-align: right;
-        }
-
-        .invoice-title-meta h1 {
-            font-size: 2.5em;
-            color: #333;
-            margin: 0 0 10px 0;
-            border-bottom: none;
-        }
-
-        .invoice-title-meta p {
-            margin: 0;
-            line-height: 1.4;
-            font-size: 1.1em;
-        }
-
-        .invoice-title-meta strong {
-            color: #555;
-        }
-
-        .address-section {
-            margin-top: 20px;
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 30px;
-        }
-
-        .address-box {
-            flex-basis: 48%;
-            padding: 15px;
-            border: 1px solid #ccc;
-            border-radius: 5px;
-        }
-
-        .address-box h3 {
-            margin-top: 0;
-            font-size: 1.1em;
-            color: #007bff;
-            border-bottom: 1px dashed #ccc;
-            padding-bottom: 5px;
-            margin-bottom: 10px;
-        }
-
-        .address-box p {
-            margin: 0;
-            line-height: 1.5;
-            font-size: 0.95em;
-        }
-
-        /* Table Styling */
-        .work-items-table table {
-            border: 1px solid #ccc;
-            margin-top: 30px;
-            border-collapse: collapse;
-        }
-
-        .work-items-table th,
-        .work-items-table td {
-            border: 1px solid #ccc;
-            padding: 10px;
-            font-size: 0.95em;
-        }
-
-        .work-items-table th {
-            background-color: #f0f0f0;
-            text-transform: uppercase;
-        }
-
-        .text-right {
-            text-align: right;
-        }
-
-        .work-title-col {
-            font-weight: bold;
-        }
-
-        /* Total Summary */
-        .total-summary {
-            display: flex;
-            justify-content: flex-end;
-            margin-top: 30px;
-        }
-
-        .total-box-custom {
-            width: 50%;
-            border: 2px solid #007bff;
-        }
-
-        .total-box-custom table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 0;
-        }
-
-        .total-box-custom th,
-        .total-box-custom td {
-            border: none;
-            padding: 8px 10px;
-        }
-
-        .total-box-custom th {
-            text-align: left;
-            font-weight: normal;
-            background: none;
-        }
-
-        .total-box-custom td {
-            text-align: right;
-            font-weight: bold;
-        }
-
-        .due-row td,
-        .due-row th {
-            background-color: #f7f7ff;
-            color: #dc3545;
-            border-top: 1px solid #007bff;
-            font-weight: bold !important;
-            font-size: 1.1em;
-        }
-
-        .amount-in-word-section {
-            margin-top: 15px;
-            font-size: 1.05em;
-        }
-
-        /* Bank Info */
-        .bank-section-custom {
-            margin-top: 40px;
-            border-top: 1px solid #eee;
-            padding-top: 15px;
-        }
-
-        .bank-section-custom h4 {
-            color: #555;
-            margin-bottom: 10px;
-            font-size: 1.1em;
-        }
-
-        .bank-item-detail {
-            margin-bottom: 8px;
-            font-size: 0.9em;
-            line-height: 1.4;
-            border-left: 3px solid #007bff;
-            padding-left: 10px;
-        }
-
-        /* Footer */
-        .software-note {
-            position: absolute;
-            bottom: 10mm;
-            left: 50%;
-            transform: translateX(-50%);
-            font-size: 0.7em;
-            color: #999;
-            text-align: center;
-        }
-
-        <?php endif; ?>
-        /* Print Styles */
-        @media print {
-            body {
-                background: none;
-            }
-
-            .container {
-                max-width: none;
-                box-shadow: none;
-            }
-
-            .invoice-page {
-                box-shadow: none;
-                margin: 0;
-                padding: 0;
-                min-height: initial;
-            }
-
-            .form-container,
-            .action-buttons,
-            .json-save-message {
-                display: none;
-            }
-
-            .invoice-page {
-                padding: 15mm;
-            }
+        .line-clamp-2 {
+            overflow: hidden;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
         }
     </style>
 </head>
 
-<body>
+<body class="bg-gradient-to-br from-gray-50 to-blue-50 min-h-screen">
+    <div class="container mx-auto px-4 py-8 max-w-7xl">
+        <!-- Header -->
+        <header class="text-center mb-12">
+            <div class="flex flex-col items-center mb-8">
+                <div class="relative mb-6">
+                    <div class="w-24 h-24 bg-gradient-to-r from-green-500 via-green-600 to-emerald-700 rounded-full flex items-center justify-center mb-4 shadow-xl">
+                        <i class="fas fa-file-invoice-dollar text-white text-4xl"></i>
+                    </div>
+                    <div class="absolute -bottom-2 -right-2 w-12 h-12 bg-gradient-to-r from-blue-500 to-blue-600 rounded-full flex items-center justify-center shadow-lg">
+                        <i class="fas fa-receipt text-white text-lg"></i>
+                    </div>
+                </div>
+                <h1 class="text-4xl font-bold text-gray-800 mb-3 bg-gradient-to-r from-green-600 to-emerald-800 bg-clip-text text-transparent">Invoice Management</h1>
+                <p class="text-gray-600 max-w-2xl text-lg">Generate, manage and download professional invoices for visa applications and services.</p>
+            </div>
+        </header>
 
-    <?php if ($show_preview): ?>
-
-        <div class="container">
-            <div class="json-save-message" style="text-align: center; margin-bottom: 15px;">
-                <?php echo $json_save_message; ?>
+        <!-- Quick Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-10">
+            <div class="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
+                <div class="flex items-center">
+                    <div class="w-14 h-14 bg-gradient-to-r from-green-100 to-green-200 rounded-xl flex items-center justify-center mr-5">
+                        <i class="fas fa-file-invoice text-green-600 text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Total Invoices</p>
+                        <h3 id="total-invoices" class="text-3xl font-bold text-gray-800 mt-1">0</h3>
+                    </div>
+                </div>
             </div>
 
-            <!-- <div class="action-buttons">
-                <button onclick="window.print()" style="background-color: #007bff;">🖨️ Print / Save as PDF</button>
-                <?php if (!empty($json_file_path)): ?>
-                    <a href="<?php echo htmlspecialchars($json_file_path); ?>" class="json-download" download>⬇️ Download
-                        JSON</a>
-                <?php endif; ?>
-                <button onclick="window.location.href = window.location.href.split('?')[0];"
-                    style="background-color: #555;">⬅️ Go Back to Form</button>
-            </div> -->
-
-            <div class="action-buttons">
-                <?php
-                // নিশ্চিত করুন যে $form_data['invoice_no'] সেট করা আছে
-                $current_invoice_no = $form_data['invoice_no'] ?? 'example_invoice';
-                ?>
-
-                <a href="download_invoice.php?invoice=<?php echo htmlspecialchars($current_invoice_no); ?>"
-                    target="_blank"
-                    style="background-color: #dc3545; color: white; padding: 8px 15px; border-radius: 4px; text-decoration: none; font-weight: bold; display: inline-block; margin-right: 10px;">
-                    ⬇️ mPDF-এ PDF ডাউনলোড করুন
-                </a>
-
-                <button onclick="window.print()" style="background-color: #007bff;">🖨️ প্রিন্ট/সেভ করুন</button>
-
-                <?php if (!empty($json_file_path)): ?>
-                    <a href="<?php echo htmlspecialchars($json_file_path); ?>" class="json-download" download>⬇️ Download JSON</a>
-                <?php endif; ?>
-                <button onclick="window.location.href = window.location.href.split('?')[0];" style="background-color: #555;">⬅️ ফর্মে ফিরে যান</button>
+            <div class="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
+                <div class="flex items-center">
+                    <div class="w-14 h-14 bg-gradient-to-r from-blue-100 to-blue-200 rounded-xl flex items-center justify-center mr-5">
+                        <i class="fas fa-money-bill-wave text-blue-600 text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Total Revenue</p>
+                        <h3 id="total-revenue" class="text-3xl font-bold text-gray-800 mt-1">৳ 0</h3>
+                    </div>
+                </div>
             </div>
 
-            <div class="invoice-page">
+            <div class="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
+                <div class="flex items-center">
+                    <div class="w-14 h-14 bg-gradient-to-r from-amber-100 to-amber-200 rounded-xl flex items-center justify-center mr-5">
+                        <i class="fas fa-clock text-amber-600 text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Pending</p>
+                        <h3 id="pending-invoices" class="text-3xl font-bold text-gray-800 mt-1">0</h3>
+                    </div>
+                </div>
+            </div>
 
-                <table style="width: 100%">
-                    <tr>
-                        <td colspan="3" style="text-align: right;">
-                            <h1 style="margin: 0px !important;" class="title">INVOICE</h1>
-                        </td>
-                    </tr>
-                    <tr style="font-size: 12px;">
-                        <td style="width: 15%">
-                            <?php
-                            $logo_file = $form_data['vendor_logo'] ?? 'No File Selected';
-                            if ($logo_file !== 'No File Selected' && file_exists('uploads/' . $logo_file)):
-                            ?>
-                                <img src="uploads/<?php echo htmlspecialchars($logo_file); ?>" width="80" alt="Vendor Logo">
-                            <?php endif; ?>
-                        </td>
-                        <td style="width: 30%">
-                            <span style="display:block;" class="sub-title">
-                                <?php echo htmlspecialchars($form_data['vendor_title'] ?? 'N/A'); ?>
-                            </span>
-
-                            <?php
-                            // Address Line 1
-                            if (!empty($form_data['vendor_address_line_01'])) {
-                                echo '<span style="display:block;">' . htmlspecialchars($form_data['vendor_address_line_01']) . '</span>';
-                            }
-
-                            // Address Line 2 (with comma only if next value exists)
-                            if (!empty($form_data['vendor_address_line_02'])) {
-                                echo '<span>';
-                                echo htmlspecialchars($form_data['vendor_address_line_02']);
-                                // Add comma only if city or postal code exists
-                                if (!empty($form_data['vendor_address_city']) || !empty($form_data['vendor_address_postal_code'])) {
-                                    echo ', ';
-                                }
-                                echo '</span>';
-                            }
-
-                            // City & Postal Code (with hyphen only if postal code exists)
-                            if (!empty($form_data['vendor_address_city']) || !empty($form_data['vendor_address_postal_code'])) {
-                                echo '<span>';
-                                if (!empty($form_data['vendor_address_city'])) {
-                                    echo htmlspecialchars($form_data['vendor_address_city']);
-                                }
-                                if (!empty($form_data['vendor_address_city']) && !empty($form_data['vendor_address_postal_code'])) {
-                                    echo '-';
-                                }
-                                if (!empty($form_data['vendor_address_postal_code'])) {
-                                    echo htmlspecialchars($form_data['vendor_address_postal_code']);
-                                }
-                                echo '</span>';
-                            }
-                            ?>
-
-                            <span style="display: block;">
-                                Phone: <?php echo htmlspecialchars($form_data['vendor_phone_no'] ?? 'N/A'); ?>
-                            </span>
-                        </td>
-
-                        <td style="width: 55%; text-align: right; vertical-align: top;">
-                            <span style="display: block;"><?php echo htmlspecialchars($form_data['invoice_no'] ?? 'N/A'); ?></span>
-                            <span style="display: block;"><strong>Date:</strong> <?php echo htmlspecialchars($form_data['date'] ?? 'N/A'); ?></span>
-                        </td>
-                    </tr>
-                </table>
-
-                <table style="width: 100%; margin-top: 15px;">
-                    <tr>
-                        <td style="width: 45%">
-                            <h3 style="margin: 5px 0px !important;" class="sub-title">Bill To:</h3>
-                            <span style="display: block;"><?php echo htmlspecialchars($form_data['client_title'] ?? 'N/A'); ?></span>
-                            <?php
-                            // Address Line 1
-                            if (!empty($form_data['client_address_line_01'])) {
-                                echo '<span style="display:block;">' . htmlspecialchars($form_data['client_address_line_01']) . '</span>';
-                            }
-
-                            // Address Line 2 (with comma only if next value exists)
-                            if (!empty($form_data['vendor_address_line_02'])) {
-                                echo '<span>';
-                                echo htmlspecialchars($form_data['client_address_line_02']);
-                                // Add comma only if city or postal code exists
-                                if (!empty($form_data['client_address_city']) || !empty($form_data['client_address_postal_code'])) {
-                                    echo ', ';
-                                }
-                                echo '</span>';
-                            }
-
-                            // City & Postal Code (with hyphen only if postal code exists)
-                            if (!empty($form_data['client_address_city']) || !empty($form_data['client_address_postal_code'])) {
-                                echo '<span>';
-                                if (!empty($form_data['client_address_city'])) {
-                                    echo htmlspecialchars($form_data['vendor_address_city']);
-                                }
-                                if (!empty($form_data['client_address_city']) && !empty($form_data['client_address_postal_code'])) {
-                                    echo '-';
-                                }
-                                if (!empty($form_data['client_address_postal_code'])) {
-                                    echo htmlspecialchars($form_data['client_address_postal_code']);
-                                }
-                                echo '</span>';
-                            }
-                            ?>
-                            </span>
-                            <?php if (!empty($form_data['client_cc'])): ?>
-                                <span style="display: block;">CC: <?php echo htmlspecialchars($form_data['client_cc']); ?></span>
-                            <?php endif; ?>
-                            <span style="display: block;"><?php echo htmlspecialchars($form_data['client_phone_no'] ?? 'N/A'); ?></span>
-                        </td>
-                        <td style="width: 55%"></td>
-                    </tr>
-                </table>
-
-                <table style="width: 100%; margin-top: 15px; border-collapse: collapse;">
-                    <thead style="background-color: #dedede">
-                        <tr>
-                            <th style="width: 48%; padding: 6px; text-align: left;">Item</th>
-                            <th style="width: 15%; padding: 6px; text-align: center;">Quantity</th>
-                            <th style="width: 20%; padding: 6px; text-align: right;">Rate</th>
-                            <th style="width: 37%; padding: 6px; text-align: right;">Amount</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($form_data['work_items'] as $item): ?>
-                            <tr>
-                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; vertical-align: top;">
-                                    <span class="sub-title"><strong><?php echo htmlspecialchars($item['work_title']); ?></strong></span><br>
-                                    <small style="color: #666;">
-                                        <?php echo nl2br(htmlspecialchars($item['work_particular'])); ?>
-                                    </small>
-                                </td>
-                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: center;">
-                                    <?php echo htmlspecialchars($item['work_qty']); ?>
-                                </td>
-                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: right;">
-                                    <strong><?php echo htmlspecialchars(number_format($item['work_rate'])); ?></strong>
-                                </td>
-                                <td style="border-bottom: 1px solid #d4d4d4; padding: 6px; text-align: right;">
-                                    <strong><?php echo htmlspecialchars(number_format($item['amount'])); ?></strong>
-                                </td>
-                            </tr>
-                        <?php endforeach; ?>
-                        <tr>
-                            <td colspan="2"></td>
-                            <th style="display: block; margin: 5px 0px;"><strong>Total Amount:</strong></th>
-                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['total_amount'] ?? 0)); ?></strong>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td colspan="2"></td>
-                            <th style="display: block; margin: 5px 0px;"><strong>Paid Amount:</strong></th>
-                            <td><strong>BDT <?php echo htmlspecialchars(number_format($form_data['paid_amount'] ?? 0)); ?></strong>
-                            </td>
-                        </tr>
-                        <tr>
-                            <td colspan="2"></td>
-                            <th style="display: block; padding: 5px 0px; background-color: #f5f5f5;"><strong>Balance Due:</strong></th>
-                            <td style="background-color: #f5f5f5;"><strong>BDT <?php echo htmlspecialchars(number_format($form_data['due_amount'] ?? 0)); ?></strong>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
-
-                <table style="width: 100%; margin-top: 5px; font-size: 12px">
-                    <tr>
-                        <td style="width: 100%">In Word: <?php echo htmlspecialchars($form_data['amount_in_word'] ?? 'N/A'); ?></td>
-                    </tr>
-                </table>
-
-                <table style="width: 100%; margin-top: 20px;">
-                    <tr>
-                        <td style="width: 100%;"><strong>Bank Info:</strong></td>
-                    </tr>
-                    <?php foreach ($form_data['bank_items'] as $item): ?>
-                        <?php if (!empty($item['vendor_bank'])): ?>
-                            <tr>
-                                <td>
-                                    <?php if (!empty($item['vendor_bank'])): ?>
-                                        <span><?php echo htmlspecialchars($item['vendor_bank']); ?> | A/C:
-                                            <?php echo htmlspecialchars($item['vendor_bank_account']); ?> | Branch:
-                                            <?php echo htmlspecialchars($item['vendor_bank_branch']); ?> | Routing:
-                                            <?php echo htmlspecialchars($item['vendor_bank_routing']); ?>
-                                        </span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endif; ?>
-                    <?php endforeach; ?>
-                    <?php foreach ($form_data['mfs_items'] as $item): ?>
-                        <?php if (!empty($item['vendor_mfs_title'])): ?>
-                            <tr>
-                                <td>
-                                    <?php if (!empty($item['vendor_mfs_title'])): ?>
-                                        <span><?php echo htmlspecialchars($item['vendor_mfs_title']); ?> |
-                                            <?php echo htmlspecialchars($item['vendor_mfs_type']); ?> | Account:
-                                            <?php
-                                            $lastIndex = count($item['vendor_mfs_account']) - 1;
-                                            foreach ($item['vendor_mfs_account'] as $i => $vendorAcc):
-                                                echo htmlspecialchars($vendorAcc);
-                                                if ($i !== $lastIndex) {
-                                                    echo " | ";
-                                                }
-                                            endforeach;
-                                            ?>
-                                        </span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                            <tr>
-                                <td>
-                                    <?php if (!empty($item['vendor_amount_note'])): ?>
-                                        <span>Note: <?php echo htmlspecialchars($item['vendor_amount_note']); ?></span>
-                                    <?php endif; ?>
-                                </td>
-                            </tr>
-                        <?php endif; ?>
-                    <?php endforeach; ?>
-                </table>
-
-                <div class="software-note">
-                    ---This is a software-generated invoice. No need for a sign and seal.---
+            <div class="bg-white rounded-2xl shadow-lg p-6 hover:shadow-xl transition-all duration-300 border border-gray-100">
+                <div class="flex items-center">
+                    <div class="w-14 h-14 bg-gradient-to-r from-red-100 to-red-200 rounded-xl flex items-center justify-center mr-5">
+                        <i class="fas fa-exclamation-triangle text-red-600 text-2xl"></i>
+                    </div>
+                    <div>
+                        <p class="text-sm text-gray-500 font-medium">Overdue</p>
+                        <h3 id="overdue-invoices" class="text-3xl font-bold text-gray-800 mt-1">0</h3>
+                    </div>
                 </div>
             </div>
         </div>
 
-    <?php else: ?>
+        <!-- Invoices Dashboard -->
+        <div class="bg-white rounded-3xl shadow-2xl overflow-hidden border border-gray-200 mb-16">
+            <div class="px-8 py-7 border-b border-gray-200 bg-gradient-to-r from-green-50/80 to-gray-50/80 backdrop-blur-sm">
+                <div class="flex flex-col lg:flex-row justify-between items-start lg:items-center">
+                    <div class="mb-6 lg:mb-0">
+                        <h2 class="text-2xl font-bold text-gray-800 mb-2">Generated Invoices</h2>
+                        <p class="text-gray-600">Manage and download all your invoices in one place</p>
+                    </div>
+                    <div class="flex flex-wrap gap-4">
+                        <button id="refresh-btn" class="bg-white hover:bg-gray-50 text-gray-800 font-medium py-3 px-5 rounded-xl transition duration-300 flex items-center shadow-sm border border-gray-200 action-btn">
+                            <i class="fas fa-sync-alt mr-3"></i> Refresh
+                        </button>
+                        <a href="create.php" id="create-invoice" class="bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white font-medium py-3 px-6 rounded-xl transition duration-300 flex items-center shadow-lg action-btn">
+                            <i class="fas fa-plus mr-3"></i> Create Invoice
+                        </a>
+                    </div>
+                </div>
 
-        <div class="container form-container">
-            <h2>📋 ইনভয়েস ডেটা এন্ট্রি ফর্ম</h2>
+                <!-- Filters -->
+                <div class="mt-8 flex flex-wrap gap-4">
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Status</label>
+                        <select id="filter-status" class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            <option value="">All Status</option>
+                            <option value="draft">Draft</option>
+                            <option value="pending">Pending</option>
+                            <option value="paid">Paid</option>
+                            <option value="overdue">Overdue</option>
+                        </select>
+                    </div>
 
-            <div class="load-json-container">
-                <?php echo $json_save_message; ?>
-                <label for="json_file_name" style="font-weight: normal; display: inline;">JSON ফাইল থেকে ডেটা লোড
-                    করুন:</label>
-                <input type="text" id="json_file_name" placeholder="invoices/INV-1234567890.json"
-                    value="invoices/example_invoice.json">
-                <button onclick="loadJsonData()" class="form-btn">💾 লোড ডেটা</button>
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Date Range</label>
+                        <select id="filter-date" class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            <option value="">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="quarter">This Quarter</option>
+                        </select>
+                    </div>
+
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Amount</label>
+                        <select id="filter-amount" class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                            <option value="">All Amounts</option>
+                            <option value="0-10000">৳ 0 - ৳ 10,000</option>
+                            <option value="10000-50000">৳ 10,000 - ৳ 50,000</option>
+                            <option value="50000-100000">৳ 50,000 - ৳ 100,000</option>
+                            <option value="100000+">৳ 100,000+</option>
+                        </select>
+                    </div>
+
+                    <div class="flex-1 min-w-[200px]">
+                        <label class="block text-sm font-medium text-gray-700 mb-2">Search</label>
+                        <input type="text" id="search-invoice" placeholder="Search by invoice no, name..." class="w-full bg-white border border-gray-300 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent">
+                    </div>
+                </div>
             </div>
 
-            <form id="invoiceForm" method="POST" action="<?php echo htmlspecialchars($_SERVER['PHP_SELF']); ?>"
-                enctype="multipart/form-data">
-
-                <div class="section-header">ভেন্ডর তথ্য</div>
-                <div class="grid-3">
-                    <div>
-                        <label for="vendor_logo">ভেন্ডর লোগো (vendor_logo)</label>
-                        <input type="file" id="vendor_logo" name="vendor_logo" accept="image/*">
-                        <div id="logo_preview" class="logo-preview"></div>
-                        <input type="hidden" id="existing_vendor_logo" name="existing_vendor_logo" value="">
-                    </div>
-                    <div>
-                        <label for="vendor_title">ভেন্ডর নাম/উপাধি (vendor_title)</label>
-                        <input type="text" id="vendor_title" name="vendor_title" required>
-                    </div>
-                    <div>
-                        <label for="vendor_phone_no">ফোন নম্বর (vendor_phone_no)</label>
-                        <input type="text" id="vendor_phone_no" name="vendor_phone_no">
-                    </div>
-                </div>
-                <label for="vendor_address">ঠিকানা (vendor_address)</label>
-                <input type="text" id="vendor_address" name="vendor_address" required>
-
-                <div class="section-header">চালান ও তারিখ</div>
-                <div class="grid-2">
-                    <div>
-                        <label for="invoice_no">চালান নম্বর (invoice_no)</label>
-                        <input type="text" id="invoice_no" name="invoice_no" required>
-                    </div>
-                    <div>
-                        <label for="date">তারিখ (date)</label>
-                        <input type="date" id="date" name="date" value="<?php echo date('Y-m-d'); ?>" required>
-                    </div>
+            <div class="p-6 lg:p-8">
+                <div id="invoices-list" class="space-y-6">
+                    <!-- Invoices will be listed here -->
                 </div>
 
-                <div class="section-header">ক্লায়েন্ট তথ্য</div>
-                <div class="grid-3">
-                    <div>
-                        <label for="client_title">ক্লায়েন্ট নাম/উপাধি (client_title)</label>
-                        <input type="text" id="client_title" name="client_title" required>
-                    </div>
-                    <div>
-                        <label for="client_phone_no">ফোন নম্বর (client_phone_no)</label>
-                        <input type="text" id="client_phone_no" name="client_phone_no">
-                    </div>
-                    <div>
-                        <label for="client_cc">কার্বন কপি (client_cc)</label>
-                        <input type="text" id="client_cc" name="client_cc">
-                    </div>
-                </div>
-                <label for="client_address">ঠিকানা (client_address)</label>
-                <input type="text" id="client_address" name="client_address" required>
-
-
-                <div class="section-header">কাজের বিবরণ</div>
-                <div id="work_items">
-                    <div class="work-item" data-index="0">
-                        <div class="grid-3">
-                            <div>
-                                <label for="work_title_0">কাজের শিরোনাম (work_title)</label>
-                                <input type="text" id="work_title_0" name="work_title[]" required>
-                            </div>
-                            <div>
-                                <label for="work_qty_0">পরিমাণ (work_qty)</label>
-                                <input type="number" id="work_qty_0" name="work_qty[]" min="1" value="1" required
-                                    oninput="calculateAmount(0)">
-                            </div>
-                            <div>
-                                <label for="work_rate_0">হার (work_rate)</label>
-                                <input type="number" id="work_rate_0" name="work_rate[]" min="0" value="0" required
-                                    oninput="calculateAmount(0)">
+                <div id="no-invoices" class="text-center py-20 hidden">
+                    <div class="max-w-lg mx-auto">
+                        <div class="w-40 h-40 mx-auto mb-8 relative">
+                            <div class="absolute inset-0 bg-gradient-to-r from-green-100 to-gray-100 rounded-full blur-xl opacity-50"></div>
+                            <div class="relative w-full h-full bg-gradient-to-br from-green-50 to-gray-50 rounded-full flex items-center justify-center border-2 border-dashed border-gray-300">
+                                <i class="fas fa-file-invoice-dollar text-gray-400 text-6xl"></i>
                             </div>
                         </div>
-                        <label for="work_particular_0">বিস্তারিত বিবরণ (work_particular)</label>
-                        <textarea id="work_particular_0" name="work_particular[]"></textarea>
-
-                        <div style="text-align: right;">
-                            <strong>মোট পরিমাণ: <span id="amount_display_0">0.00</span></strong>
-                            <input type="hidden" id="amount_0" name="amount[]" value="0">
-                            <button type="button" class="remove-btn" onclick="removeWorkItem(this)">মুছে ফেলুন</button>
-                        </div>
+                        <h3 class="text-2xl font-semibold text-gray-600 mb-3">No invoices found</h3>
+                        <p class="text-gray-500 mb-8 max-w-md mx-auto">Start by creating your first invoice for visa applications or services.</p>
+                        <a href="create.php" class="bg-gradient-to-r from-green-600 to-emerald-700 hover:from-green-700 hover:to-emerald-800 text-white font-medium py-4 px-10 rounded-xl transition duration-300 shadow-lg action-btn text-lg inline-flex items-center">
+                            <i class="fas fa-plus mr-3"></i> Create First Invoice
+                        </a>
                     </div>
                 </div>
-                <button type="button" onclick="addWorkItem()">➕ আরও কাজ যোগ করুন</button>
-
-
-                <div class="section-header total-section">মোট হিসেব</div>
-                <div class="grid-3">
-                    <div>
-                        <label>মোট চালান পরিমাণ (total_amount)</label>
-                        <input type="text" id="total_amount_display" value="0.00" readonly>
-                        <input type="hidden" id="total_amount" name="total_amount" value="0">
-                    </div>
-                    <div>
-                        <label for="paid_amount">পরিশোধিত পরিমাণ (paid_amount)</label>
-                        <input type="number" id="paid_amount" name="paid_amount" min="0" value="0"
-                            oninput="calculateDueAmount()" required>
-                    </div>
-                    <div>
-                        <label>বাকি পরিমাণ (due_amount)</label>
-                        <input type="text" id="due_amount_display" value="0.00" readonly>
-                        <input type="hidden" id="due_amount" name="due_amount" value="0">
-                    </div>
-                </div>
-                <label for="amount_in_word">কথায় পরিমাণ (amount_in_word)</label>
-                <input type="text" id="amount_in_word" name="amount_in_word">
-
-                <div class="section-header">ভেন্ডর ব্যাংক ও MFS তথ্য</div>
-                <div id="vendor_bank_details">
-                    <div class="bank-item" data-index="0">
-                        <div class="grid-2">
-                            <div>
-                                <label for="vendor_bank_0">ব্যাংকের নাম (vendor_bank)</label>
-                                <input type="text" id="vendor_bank_0" name="vendor_bank[]">
-                                <label for="vendor_bank_account_0">অ্যাকাউন্ট নম্বর (vendor_bank_account)</label>
-                                <input type="text" id="vendor_bank_account_0" name="vendor_bank_account[]">
-                            </div>
-                            <div>
-                                <label for="vendor_bank_branch_0">শাখার নাম (vendor_bank_branch)</label>
-                                <input type="text" id="vendor_bank_branch_0" name="vendor_bank_branch[]">
-                                <label for="vendor_bank_routing_0">রাউটিং নম্বর (vendor_bank_routing)</label>
-                                <input type="text" id="vendor_bank_routing_0" name="vendor_bank_routing[]">
-                            </div>
-                        </div>
-
-                        <label for="vendor_mfs_title_0">MFS সার্ভিস নাম (vendor_mfs_title)</label>
-                        <input type="text" id="vendor_mfs_title_0" name="vendor_mfs_title[]">
-                        <div class="grid-2">
-                            <div>
-                                <label for="vendor_mfs_type_0">MFS অ্যাকাউন্ট প্রকার (vendor_mfs_type)</label>
-                                <input type="text" id="vendor_mfs_type_0" name="vendor_mfs_type[]">
-                            </div>
-                            <div>
-                                <label for="vendor_mfs_account_0">MFS অ্যাকাউন্ট নম্বর (vendor_mfs_account)</label>
-                                <input type="text" id="vendor_mfs_account_0" name="vendor_mfs_account[]">
-                            </div>
-                        </div>
-                        <label for="vendor_amount_note_0">পরিমাণ সংক্রান্ত অতিরিক্ত নোট (vendor_amount_note)</label>
-                        <input type="text" id="vendor_amount_note_0" name="vendor_amount_note[]">
-
-                        <div style="text-align: right;">
-                            <button type="button" class="remove-btn" onclick="removeBankItem(this)">মুছে ফেলুন</button>
-                        </div>
-                    </div>
-                </div>
-                <button type="button" onclick="addBankItem()">➕ আরও ব্যাংক/MFS তথ্য যোগ করুন</button>
-
-                <div style="text-align: center; margin-top: 30px;">
-                    <button type="submit" class="form-btn">✅ ফর্ম সাবমিট করুন ও প্রিভিউ দেখুন</button>
-                </div>
-            </form>
+            </div>
         </div>
 
-        <script>
-            let workItemCount = 1;
-            let bankItemCount = 1;
-
-            // --- কমন ফর্ম ফাংশন (unchanged) ---
-
-            function getWorkItemHtml(index) {
-                return `
-                <div class="grid-3">
-                    <div><label for="work_title_${index}">কাজের শিরোনাম</label><input type="text" id="work_title_${index}" name="work_title[]" required></div>
-                    <div><label for="work_qty_${index}">পরিমাণ</label><input type="number" id="work_qty_${index}" name="work_qty[]" min="1" value="1" required oninput="calculateAmount(${index})"></div>
-                    <div><label for="work_rate_${index}">হার</label><input type="number" id="work_rate_${index}" name="work_rate[]" min="0" value="0" required oninput="calculateAmount(${index})"></div>
+        <!-- Footer -->
+        <footer class="mt-20 pt-10 border-t border-gray-200">
+            <div class="flex flex-col lg:flex-row justify-between items-center">
+                <div class="mb-8 lg:mb-0">
+                    <div class="flex items-center">
+                        <div class="w-12 h-12 bg-gradient-to-r from-green-600 to-emerald-800 rounded-xl flex items-center justify-center mr-4 shadow-lg">
+                            <i class="fas fa-globe-asia text-white text-xl"></i>
+                        </div>
+                        <div>
+                            <h4 class="font-bold text-gray-800 text-lg">TravHub Global Limited</h4>
+                            <p class="text-sm text-gray-500">Professional Billing & Invoice Services</p>
+                        </div>
+                    </div>
                 </div>
-                <label for="work_particular_${index}">বিস্তারিত বিবরণ</label><textarea id="work_particular_${index}" name="work_particular[]"></textarea>
-                <div style="text-align: right;">
-                    <strong>মোট পরিমাণ: <span id="amount_display_${index}">0.00</span></strong>
-                    <input type="hidden" id="amount_${index}" name="amount[]" value="0">
-                    <button type="button" class="remove-btn" onclick="removeWorkItem(this)">মুছে ফেলুন</button>
+                <div class="text-center lg:text-right">
+                    <p class="text-gray-500 text-sm mb-2">© 2025 TravHub Global Limited. All rights reserved.</p>
+                    <p class="text-gray-400 text-xs">Invoice Management System for Visa Applications</p>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Invoice data structure - Now properly formatted
+        let invoices = <?php echo json_encode($invoices, JSON_PRETTY_PRINT); ?>;
+        let itemCounter = 1;
+
+        // Initialize the dashboard
+        document.addEventListener('DOMContentLoaded', function() {
+            loadInvoices();
+            setupEventListeners();
+        });
+
+        // Set up event listeners
+        function setupEventListeners() {
+            document.getElementById('refresh-btn').addEventListener('click', loadInvoices);
+
+            // Filter event listeners
+            ['filter-status', 'filter-date', 'filter-amount'].forEach(id => {
+                document.getElementById(id).addEventListener('change', filterInvoices);
+            });
+
+            // Search listener
+            document.getElementById('search-invoice').addEventListener('input', filterInvoices);
+        }
+
+        // Load all invoices
+        function loadInvoices() {
+            // You can add AJAX call here to refresh from server
+            // For now, we'll just use the PHP-loaded data
+            renderInvoices();
+            updateStats();
+        }
+
+        // Send via Email
+        function sendEmail(invoiceId, email) {
+            if (!email) {
+                alert('No email address found for this client.');
+                return;
+            }
+
+            if (confirm(`Send invoice to ${email}?`)) {
+                fetch('send_invoice.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            invoice_id: invoiceId,
+                            email: email,
+                            method: 'email'
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Invoice sent via email successfully!');
+                        } else {
+                            alert('Error sending invoice: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error sending invoice: ' + error.message);
+                    });
+            }
+        }
+
+        // Send via WhatsApp
+        function sendWhatsApp(invoiceId, phone) {
+            if (!phone) {
+                alert('No phone number found for this client.');
+                return;
+            }
+
+            // Clean phone number (remove spaces, +, etc.)
+            const cleanPhone = phone.replace(/[\s\+]/g, '');
+
+            // Get invoice details first
+            const invoice = invoices.find(inv => inv.id == invoiceId);
+            if (!invoice) {
+                alert('Invoice not found!');
+                return;
+            }
+
+            // Create WhatsApp message
+            const message = `Hello! Here is your invoice ${invoice.invoice_no}.\n` +
+                `Amount: ${invoice.currency || 'BDT'} ${invoice.total_amount.toFixed(2)}\n` +
+                `You can download it here: ${window.location.origin}/print-invoice.php?id=${invoiceId}\n` +
+                `Thank you!`;
+
+            // URL encode the message
+            const encodedMessage = encodeURIComponent(message);
+
+            // Create WhatsApp URL
+            const whatsappUrl = `https://wa.me/${cleanPhone}?text=${encodedMessage}`;
+
+            if (confirm(`Send invoice via WhatsApp to ${phone}?`)) {
+                // Open WhatsApp in new tab
+                window.open(whatsappUrl, '_blank');
+
+                // Optional: Log in your system
+                logWhatsAppSend(invoiceId, phone);
+            }
+        }
+
+        // Log WhatsApp send (optional)
+        function logWhatsAppSend(invoiceId, phone) {
+            fetch('log_whatsapp_send.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        invoice_id: invoiceId,
+                        phone: phone,
+                        timestamp: new Date().toISOString()
+                    })
+                })
+                .catch(error => console.error('Error logging WhatsApp send:', error));
+        }
+
+        // Send invoice with options modal
+        function sendInvoiceWithOptions(invoiceId, email, phone) {
+            const invoice = invoices.find(inv => inv.id == invoiceId);
+            if (!invoice) {
+                alert('Invoice not found!');
+                return;
+            }
+
+            // Create modal
+            const modal = document.createElement('div');
+            modal.className = 'fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center p-4 z-50';
+            modal.innerHTML = `
+                <div class="bg-white rounded-3xl shadow-2xl max-w-md w-full">
+                    <div class="p-7 border-b border-gray-200 bg-gradient-to-r from-purple-50 to-gray-50">
+                        <div class="flex items-center">
+                            <div class="w-12 h-12 bg-gradient-to-r from-purple-600 to-purple-700 rounded-xl flex items-center justify-center mr-5">
+                                <i class="fas fa-paper-plane text-white text-xl"></i>
+                            </div>
+                            <div>
+                                <h3 class="text-xl font-bold text-gray-800">Send Invoice</h3>
+                                <p class="text-gray-600 text-sm mt-1">${invoice.invoice_no}</p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-7">
+                        <div class="space-y-4">
+                            ${email ? `
+                                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-gradient-to-r from-purple-100 to-purple-200 rounded-lg flex items-center justify-center mr-4">
+                                            <i class="fas fa-envelope text-purple-600"></i>
+                                        </div>
+                                        <div>
+                                            <div class="font-medium text-gray-800">Email</div>
+                                            <div class="text-sm text-gray-600">${email}</div>
+                                        </div>
+                                    </div>
+                                    <button onclick="sendEmail('${invoiceId}', '${email}'); this.closest('.fixed').remove()" 
+                                            class="bg-purple-600 hover:bg-purple-700 text-white py-2 px-4 rounded-lg transition duration-300">
+                                        Send
+                                    </button>
+                                </div>
+                            ` : ''}
+                            
+                            ${phone ? `
+                                <div class="flex items-center justify-between p-4 bg-gray-50 rounded-xl border border-gray-200">
+                                    <div class="flex items-center">
+                                        <div class="w-10 h-10 bg-gradient-to-r from-green-100 to-green-200 rounded-lg flex items-center justify-center mr-4">
+                                            <i class="fab fa-whatsapp text-green-600"></i>
+                                        </div>
+                                        <div>
+                                            <div class="font-medium text-gray-800">WhatsApp</div>
+                                            <div class="text-sm text-gray-600">${phone}</div>
+                                        </div>
+                                    </div>
+                                    <button onclick="sendWhatsApp('${invoiceId}', '${phone}'); this.closest('.fixed').remove()" 
+                                            class="bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-lg transition duration-300">
+                                        Send
+                                    </button>
+                                </div>
+                            ` : ''}
+                            
+                            ${!email && !phone ? `
+                                <div class="text-center py-8">
+                                    <i class="fas fa-exclamation-circle text-gray-400 text-4xl mb-4"></i>
+                                    <p class="text-gray-600">No contact information available for this client.</p>
+                                </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    <div class="p-7 border-t border-gray-200 bg-gray-50 flex justify-end">
+                        <button onclick="this.closest('.fixed').remove()" 
+                                class="bg-gray-200 hover:bg-gray-300 text-gray-800 font-medium py-3 px-6 rounded-xl transition duration-300">
+                            Cancel
+                        </button>
+                    </div>
                 </div>
             `;
+
+            document.body.appendChild(modal);
+
+            // Close modal when clicking outside
+            modal.addEventListener('click', function(e) {
+                if (e.target === modal) {
+                    modal.remove();
+                }
+            });
+        }
+
+        // Render the invoices list
+        function renderInvoices(filteredInvoices = null) {
+            const invoicesToRender = filteredInvoices || invoices;
+            const listContainer = document.getElementById('invoices-list');
+            const noInvoices = document.getElementById('no-invoices');
+
+            if (invoicesToRender.length === 0) {
+                listContainer.innerHTML = '';
+                noInvoices.classList.remove('hidden');
+                return;
             }
 
-            function addWorkItem() {
-                const index = workItemCount++;
-                const container = document.getElementById('work_items');
-                const newItem = document.createElement('div');
-                newItem.className = 'work-item';
-                newItem.setAttribute('data-index', index);
-                newItem.innerHTML = getWorkItemHtml(index);
-                container.appendChild(newItem);
-            }
+            noInvoices.classList.add('hidden');
 
-            function removeWorkItem(button) {
-                const item = button.closest('.work-item');
-                item.remove();
-                calculateTotalAmount();
-            }
+            let html = '';
+            invoicesToRender.forEach((invoice, index) => {
+                const createdDate = new Date(invoice.created_at);
+                const dueDate = new Date(invoice.due_date);
+                const invoiceDate = new Date(invoice.invoice_date);
+                const now = new Date();
 
-            function getBankItemHtml(index) {
-                return `
-                <div class="grid-2">
-                    <div><label for="vendor_bank_${index}">ব্যাংকের নাম</label><input type="text" id="vendor_bank_${index}" name="vendor_bank[]">
-                        <label for="vendor_bank_account_${index}">অ্যাকাউন্ট নম্বর</label><input type="text" id="vendor_bank_account_${index}" name="vendor_bank_account[]"></div>
-                    <div><label for="vendor_bank_branch_${index}">শাখার নাম</label><input type="text" id="vendor_bank_branch_${index}" name="vendor_bank_branch[]">
-                        <label for="vendor_bank_routing_${index}">রাউটিং নম্বর</label><input type="text" id="vendor_bank_routing_${index}" name="vendor_bank_routing[]"></div>
-                </div>
-                <label for="vendor_mfs_title_${index}">MFS সার্ভিস নাম</label><input type="text" id="vendor_mfs_title_${index}" name="vendor_mfs_title[]">
-                <div class="grid-2">
-                    <div><label for="vendor_mfs_type_${index}">MFS অ্যাকাউন্ট প্রকার</label><input type="text" id="vendor_mfs_type_${index}" name="vendor_mfs_type[]"></div>
-                    <div><label for="vendor_mfs_account_${index}">MFS অ্যাকাউন্ট নম্বর</label><input type="text" id="vendor_mfs_account_${index}" name="vendor_mfs_account[]"></div>
-                </div>
-                <label for="vendor_amount_note_${index}">পরিমাণ সংক্রান্ত অতিরিক্ত নোট</label><input type="text" id="vendor_amount_note_${index}" name="vendor_amount_note[]">
-                <div style="text-align: right;"><button type="button" class="remove-btn" onclick="removeBankItem(this)">মুছে ফেলুন</button></div>
-            `;
-            }
-
-            function addBankItem() {
-                const index = bankItemCount++;
-                const container = document.getElementById('vendor_bank_details');
-                const newItem = document.createElement('div');
-                newItem.className = 'bank-item';
-                newItem.setAttribute('data-index', index);
-                newItem.innerHTML = getBankItemHtml(index);
-                container.appendChild(newItem);
-            }
-
-            function removeBankItem(button) {
-                button.closest('.bank-item').remove();
-            }
-
-            function calculateAmount(index) {
-                const qty = parseFloat(document.getElementById(`work_qty_${index}`).value) || 0;
-                const rate = parseFloat(document.getElementById(`work_rate_${index}`).value) || 0;
-                const amount = (qty * rate).toFixed(2);
-
-                document.getElementById(`amount_display_${index}`).textContent = amount;
-                document.getElementById(`amount_${index}`).value = amount;
-                calculateTotalAmount();
-            }
-
-            function calculateTotalAmount() {
-                let total = 0;
-                document.querySelectorAll('input[name="amount[]"]').forEach(input => {
-                    total += parseFloat(input.value) || 0;
+                const formattedDate = createdDate.toLocaleDateString('en-US', {
+                    year: 'numeric',
+                    month: 'short',
+                    day: 'numeric'
                 });
 
-                const roundedTotal = total.toFixed(2);
+                const dueFormatted = dueDate.toLocaleDateString('en-US', {
+                    month: 'short',
+                    day: 'numeric'
+                });
 
-                document.getElementById('total_amount_display').value = roundedTotal;
-                document.getElementById('total_amount').value = roundedTotal;
-                calculateDueAmount();
+                // Determine status and overdue
+                let statusClass, statusText, isOverdue = false;
+
+                if (invoice.status === 'paid') {
+                    statusClass = 'status-paid';
+                    statusText = 'Paid';
+                } else if (invoice.status === 'overdue') {
+                    statusClass = 'status-overdue';
+                    statusText = 'Overdue';
+                    isOverdue = true;
+                } else if (invoice.status === 'pending') {
+                    if (dueDate < now) {
+                        statusClass = 'status-overdue';
+                        statusText = 'Overdue';
+                        isOverdue = true;
+                    } else {
+                        statusClass = 'status-pending';
+                        statusText = 'Pending';
+                    }
+                } else {
+                    statusClass = 'status-pending';
+                    statusText = 'Pending';
+                }
+
+                // Determine invoice type from description
+                let typeClass = 'type-other';
+                let typeText = 'Service';
+                const desc = invoice.description?.toLowerCase() || '';
+                if (desc.includes('visa') || desc.includes('application')) {
+                    typeClass = 'type-visa';
+                    typeText = 'Visa';
+                } else if (desc.includes('ticket') || desc.includes('flight')) {
+                    typeClass = 'type-ticket';
+                    typeText = 'Ticket';
+                } else if (desc.includes('service') || desc.includes('fee')) {
+                    typeClass = 'type-service';
+                    typeText = 'Service';
+                }
+
+                html += `
+                    <div class="invoice-card bg-white border border-gray-200 rounded-2xl p-6 hover:border-green-300 fade-in">
+                        <div class="flex flex-col lg:flex-row justify-between gap-6">
+                            <!-- Left Column -->
+                            <div class="flex-1">
+                                <!-- Header Section -->
+                                <div class="flex flex-col lg:flex-row lg:items-start justify-between mb-6">
+                                    <div class="mb-4 lg:mb-0">
+                                        <div class="flex items-center mb-3">
+                                            <div class="w-12 h-12 bg-gradient-to-r from-green-100 to-green-200 rounded-xl flex items-center justify-center mr-4">
+                                                <i class="fas fa-file-invoice text-green-600 text-xl"></i>
+                                            </div>
+                                            <div>
+                                                <h3 class="font-bold text-gray-800 text-xl">
+                                                    ${invoice.client_name || 'Unnamed Client'}
+                                                </h3>
+                                                <div class="flex items-center mt-2">
+                                                    <span class="text-gray-600 text-sm mr-4">
+                                                        <i class="far fa-calendar mr-1"></i> ${formattedDate}
+                                                    </span>
+                                                    <span class="text-gray-600 text-sm ${isOverdue ? 'text-red-600 font-medium' : ''}">
+                                                        <i class="far fa-clock mr-1"></i> Due: ${dueFormatted}
+                                                    </span>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="flex flex-wrap items-center gap-3 text-sm text-gray-600">
+                                            <span class="flex items-center bg-gray-100 px-3 py-1.5 rounded-full">
+                                                <i class="fas fa-hashtag mr-2"></i> ${invoice.invoice_no}
+                                            </span>
+                                            <span class="invoice-type-badge ${typeClass}">
+                                                ${typeText}
+                                            </span>
+                                            ${invoice.phone ? `
+                                                <span class="flex items-center bg-gray-100 px-3 py-1.5 rounded-full">
+                                                    <i class="fas fa-phone mr-2"></i> ${invoice.phone}
+                                                </span>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                    
+                                    <div class="flex flex-col items-end">
+                                        <div class="amount-badge mb-3">
+                                            ${invoice.currency || 'BDT'} ${invoice.total_amount.toFixed(2)}
+                                        </div>
+                                        <span class="status-badge ${statusClass}">${statusText}</span>
+                                    </div>
+                                </div>
+                                
+                                <!-- Payment Summary -->
+                                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+                                    <div class="bg-green-50 p-3 rounded-lg border border-green-100">
+                                        <div class="text-sm text-green-700 mb-1">Total Amount</div>
+                                        <div class="text-lg font-bold text-green-800">৳ ${invoice.total_amount.toFixed(2)}</div>
+                                    </div>
+                                    <div class="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                                        <div class="text-sm text-blue-700 mb-1">Paid Amount</div>
+                                        <div class="text-lg font-bold text-blue-800">৳ ${invoice.paid_amount.toFixed(2)}</div>
+                                    </div>
+                                    <div class="bg-red-50 p-3 rounded-lg border border-red-100">
+                                        <div class="text-sm text-red-700 mb-1">Due Amount</div>
+                                        <div class="text-lg font-bold text-red-800">৳ ${invoice.due_amount.toFixed(2)}</div>
+                                    </div>
+                                </div>
+                                
+                                <!-- Items Preview -->
+                                ${invoice.items && invoice.items.length > 0 ? `
+                                    <div class="bg-gray-50 p-4 rounded-xl border border-gray-100">
+                                        <div class="text-sm text-gray-500 mb-2">Items (${invoice.items.length})</div>
+                                        <div class="space-y-2">
+                                            ${invoice.items.slice(0, 2).map(item => `
+                                                <div class="flex justify-between items-center text-sm">
+                                                    <span class="text-gray-700">${item.description || 'Item'}</span>
+                                                    <span class="text-gray-800 font-medium">${invoice.currency || 'BDT'} ${item.total.toFixed(2)}</span>
+                                                </div>
+                                            `).join('')}
+                                            ${invoice.items.length > 2 ? `
+                                                <div class="text-center text-sm text-gray-500 pt-2 border-t border-gray-200">
+                                                    +${invoice.items.length - 2} more items
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            
+                            <!-- Action Buttons -->
+                            <div class="lg:w-64 flex flex-col space-y-3">
+                                <button class="download-btn bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 text-white font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn shadow-md"
+                                        onclick="downloadInvoice('${invoice.id}')" 
+                                        title="Download PDF">
+                                    <i class="fas fa-download mr-3"></i>
+                                    <span>Download PDF</span>
+                                </button>
+                                <button class="view-btn bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn"
+                                        onclick="viewInvoice('${invoice.id}')" 
+                                        title="View Details">
+                                    <i class="fas fa-eye mr-3"></i>
+                                    <span>View Details</span>
+                                </button>
+                                <button class="send-btn bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn"
+                                        onclick="sendInvoiceWithOptions('${invoice.id}', '${invoice.client_email}', '${invoice.phone}')" 
+                                        title="Send Invoice">
+                                    <i class="fas fa-paper-plane mr-3"></i>
+                                    <span>Send Invoice</span>
+                                </button>
+                                ${invoice.status !== 'paid' ? `
+                                    <button class="mark-paid-btn bg-green-50 hover:bg-green-100 text-green-700 border border-green-200 font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn"
+                                            onclick="markAsPaid('${invoice.id}')" 
+                                            title="Mark as Paid">
+                                        <i class="fas fa-check-circle mr-3"></i>
+                                        <span>Mark as Paid</span>
+                                    </button>
+                                ` : ''}
+                                <button class="delete-btn bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn"
+                                        onclick="deleteInvoice('${invoice.id}')" 
+                                        title="Delete Invoice">
+                                    <i class="fas fa-trash mr-3"></i>
+                                    <span>Delete</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            });
+
+            listContainer.innerHTML = html;
+        }
+
+        // Filter invoices
+        function filterInvoices() {
+            const statusFilter = document.getElementById('filter-status').value;
+            const dateFilter = document.getElementById('filter-date').value;
+            const amountFilter = document.getElementById('filter-amount').value;
+            const searchFilter = document.getElementById('search-invoice').value.toLowerCase();
+
+            let filteredInvoices = invoices;
+
+            // Status filter
+            if (statusFilter) {
+                filteredInvoices = filteredInvoices.filter(inv => inv.status === statusFilter);
             }
 
-            function calculateDueAmount() {
-                const total = parseFloat(document.getElementById('total_amount').value) || 0;
-                const paid = parseFloat(document.getElementById('paid_amount').value) || 0;
-                const due = (total - paid).toFixed(2);
+            // Date filter
+            if (dateFilter) {
+                const now = new Date();
+                const startDate = new Date();
 
-                document.getElementById('due_amount_display').value = due;
-                document.getElementById('due_amount').value = due;
+                switch (dateFilter) {
+                    case 'today':
+                        startDate.setHours(0, 0, 0, 0);
+                        break;
+                    case 'week':
+                        startDate.setDate(now.getDate() - 7);
+                        break;
+                    case 'month':
+                        startDate.setMonth(now.getMonth() - 1);
+                        break;
+                    case 'quarter':
+                        startDate.setMonth(now.getMonth() - 3);
+                        break;
+                }
+
+                filteredInvoices = filteredInvoices.filter(inv => {
+                    const invDate = new Date(inv.created_at);
+                    return invDate >= startDate;
+                });
             }
 
-            // --- JSON লোডিং ফাংশন (unchanged) ---
+            // Amount filter
+            if (amountFilter) {
+                const [min, max] = amountFilter.split('-').map(val => {
+                    if (val.endsWith('+')) {
+                        return parseFloat(val.slice(0, -1));
+                    }
+                    return parseFloat(val.replace(/[^0-9.]/g, ''));
+                });
 
-            async function loadJsonData() {
-                const filename = document.getElementById('json_file_name').value.trim();
-                if (!filename) {
-                    alert("JSON ফাইলের নাম দিন।");
+                filteredInvoices = filteredInvoices.filter(inv => {
+                    const amount = inv.total_amount;
+                    if (amountFilter.endsWith('+')) {
+                        return amount >= min;
+                    } else {
+                        return amount >= min && amount <= max;
+                    }
+                });
+            }
+
+            // Search filter
+            if (searchFilter) {
+                filteredInvoices = filteredInvoices.filter(inv => {
+                    return (
+                        (inv.invoice_no && inv.invoice_no.toLowerCase().includes(searchFilter)) ||
+                        (inv.client_name && inv.client_name.toLowerCase().includes(searchFilter)) ||
+                        (inv.client_email && inv.client_email.toLowerCase().includes(searchFilter)) ||
+                        (inv.description && inv.description.toLowerCase().includes(searchFilter))
+                    );
+                });
+            }
+
+            renderInvoices(filteredInvoices);
+        }
+
+        // Update dashboard statistics
+        function updateStats() {
+            const totalInvoices = invoices.length;
+            const paidInvoices = invoices.filter(inv => inv.status === 'paid').length;
+            const pendingInvoices = invoices.filter(inv => inv.status === 'pending').length;
+            const overdueInvoices = invoices.filter(inv => inv.status === 'overdue').length;
+
+            // Calculate total revenue (sum of total_amount of all invoices)
+            let totalRevenue = 0;
+            invoices.forEach(inv => {
+                totalRevenue += inv.total_amount;
+            });
+
+            document.getElementById('total-invoices').textContent = totalInvoices;
+            document.getElementById('pending-invoices').textContent = pendingInvoices + overdueInvoices;
+            document.getElementById('overdue-invoices').textContent = overdueInvoices;
+            document.getElementById('total-revenue').textContent = `৳ ${totalRevenue.toFixed(2)}`;
+        }
+
+        // Download invoice as PDF
+        function downloadInvoice(invoiceId) {
+            // Redirect to print-invoice.php
+            window.open(`print-invoice.php?id=${invoiceId}`, '_blank');
+        }
+
+        // View invoice details
+        function viewInvoice(invoiceId) {
+            // You can create a view page or use the print page
+            window.open(`print-invoice.php?id=${invoiceId}`, '_blank');
+        }
+
+        // Send invoice to client
+        function sendInvoice(invoiceId, email) {
+            if (!email) {
+                alert('No email address found for this client.');
+                return;
+            }
+
+            if (confirm(`Send invoice to ${email}?`)) {
+                // AJAX call to send email
+                fetch('send_invoice.php', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            invoice_id: invoiceId,
+                            email: email
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            alert('Invoice sent successfully!');
+                        } else {
+                            alert('Error sending invoice: ' + data.message);
+                        }
+                    })
+                    .catch(error => {
+                        alert('Error sending invoice: ' + error.message);
+                    });
+            }
+        }
+
+        // Mark invoice as paid
+        function markAsPaid(invoiceId) {
+            if (confirm(`Mark this invoice as paid?`)) {
+                // Find invoice
+                const invoiceIndex = invoices.findIndex(inv => inv.id == invoiceId);
+                if (invoiceIndex !== -1) {
+                    // Update local data
+                    invoices[invoiceIndex].status = 'paid';
+                    invoices[invoiceIndex].paid_amount = invoices[invoiceIndex].total_amount;
+                    invoices[invoiceIndex].due_amount = 0;
+
+                    // Update in database via AJAX
+                    updateInvoiceStatus(invoiceId, 'paid', invoices[invoiceIndex].total_amount);
+
+                    // Refresh display
+                    renderInvoices();
+                    updateStats();
+
+                    alert('Invoice marked as paid!');
+                }
+            }
+        }
+
+        // Delete invoice
+        function deleteInvoice(invoiceId) {
+            if (confirm(`Are you sure you want to delete this invoice? This action cannot be undone.`)) {
+                // Find invoice
+                const invoice = invoices.find(inv => inv.id == invoiceId);
+                if (!invoice) {
+                    alert('Invoice not found!');
                     return;
                 }
 
-                try {
-                    const response = await fetch(filename);
-                    if (!response.ok) {
-                        throw new Error(`HTTP error! status: ${response.status}`);
-                    }
-                    const data = await response.json();
+                // Remove from array
+                invoices = invoices.filter(inv => inv.id != invoiceId);
 
-                    // সমস্ত অতিরিক্ত ওয়ার্ক ও ব্যাংক আইটেম মুছে ফেলা
-                    document.getElementById('work_items').innerHTML = '';
-                    document.getElementById('vendor_bank_details').innerHTML = '';
-                    workItemCount = 0;
-                    bankItemCount = 0;
+                // Delete from database via AJAX
+                deleteInvoiceFromDatabase(invoiceId);
 
-                    // ১. সিঙ্গেল ভ্যালু ফিল্ডগুলো পূরণ করা
-                    for (const key in data) {
-                        const inputField = document.getElementById(key);
-                        if (inputField && key !== 'work_items' && key !== 'bank_items' && key !== 'vendor_logo') {
-                            inputField.value = data[key] || '';
-                        }
-                    }
+                // Refresh display
+                renderInvoices();
+                updateStats();
 
-                    // লোগো ফিল্ড হ্যান্ডলিং
-                    const logoPreview = document.getElementById('logo_preview');
-                    const existingLogoInput = document.getElementById('existing_vendor_logo');
-                    if (data.vendor_logo && data.vendor_logo !== 'No File Selected') {
-                        existingLogoInput.value = data.vendor_logo;
-                        logoPreview.innerHTML = `**Existing Logo:** ${data.vendor_logo} (Upload new file to replace)`;
-                    } else {
-                        existingLogoInput.value = '';
-                        logoPreview.innerHTML = ``;
-                    }
-
-                    // ২. কাজের আইটেমগুলো (work_items) পূরণ করা
-                    if (data.work_items && Array.isArray(data.work_items)) {
-                        data.work_items.forEach((item, index) => {
-                            if (index === 0) {
-                                document.getElementById('work_items').innerHTML = `<div class="work-item" data-index="0">${getWorkItemHtml(0)}</div>`;
-                            } else {
-                                addWorkItem();
-                            }
-                            const current_index = index;
-
-                            document.getElementById(`work_title_${current_index}`).value = item.work_title || '';
-                            document.getElementById(`work_particular_${current_index}`).value = item.work_particular || '';
-                            document.getElementById(`work_qty_${current_index}`).value = item.work_qty || 0;
-                            document.getElementById(`work_rate_${current_index}`).value = item.work_rate || 0;
-
-                            calculateAmount(current_index);
-                        });
-                    }
-
-                    // ৩. ব্যাংক আইটেমগুলো (bank_items) পূরণ করা
-                    if (data.bank_items && Array.isArray(data.bank_items)) {
-                        data.bank_items.forEach((item, index) => {
-                            if (index === 0) {
-                                document.getElementById('vendor_bank_details').innerHTML = `<div class="bank-item" data-index="0">${getBankItemHtml(0)}</div>`;
-                            } else {
-                                addBankItem();
-                            }
-                            const current_index = index;
-
-                            document.getElementById(`vendor_bank_${current_index}`).value = item.vendor_bank || '';
-                            document.getElementById(`vendor_bank_account_${current_index}`).value = item.vendor_bank_account || '';
-                            document.getElementById(`vendor_bank_branch_${current_index}`).value = item.vendor_bank_branch || '';
-                            document.getElementById(`vendor_bank_routing_${current_index}`).value = item.vendor_bank_routing || '';
-                            document.getElementById(`vendor_mfs_title_${current_index}`).value = item.vendor_mfs_title || '';
-                            document.getElementById(`vendor_mfs_type_${current_index}`).value = item.vendor_mfs_type || '';
-                            document.getElementById(`vendor_mfs_account_${current_index}`).value = item.vendor_mfs_account || '';
-                            document.getElementById(`vendor_amount_note_${current_index}`).value = item.vendor_amount_note || '';
-                        });
-                    }
-
-
-                    // ৪. টোটাল এবং ডিউ অ্যামাউন্ট আপডেট করা
-                    calculateTotalAmount();
-
-                    alert("ডেটা সফলভাবে লোড হয়েছে! আপনি এখন সাবমিট করতে পারেন।");
-
-                } catch (error) {
-                    console.error('Error loading JSON:', error);
-                    alert("JSON ফাইল লোড বা প্রসেস করা যায়নি। ফাইলের নাম ও পাথ চেক করুন। (" + filename + ")");
-                }
+                alert('Invoice deleted successfully!');
             }
+        }
 
-            // প্রাথমিক লোডের সময় ক্যালকুলেশন
-            document.addEventListener('DOMContentLoaded', () => {
-                // শুধুমাত্র ফর্মে গেলে ইনিশিয়ালাইজ করা হবে
-                if (document.querySelector('.form-container')) {
-                    if (document.getElementById('work_items').children.length === 0) {
-                        document.getElementById('work_items').innerHTML = `<div class="work-item" data-index="0">${getWorkItemHtml(0)}</div>`;
-                    }
-                    if (document.getElementById('vendor_bank_details').children.length === 0) {
-                        document.getElementById('vendor_bank_details').innerHTML = `<div class="bank-item" data-index="0">${getBankItemHtml(0)}</div>`;
-                    }
-                    calculateTotalAmount();
-                }
-            });
-        </script>
-    <?php endif; ?>
+        // Update invoice status in database
+        function updateInvoiceStatus(invoiceId, status, paidAmount) {
+            fetch('update_invoice.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: invoiceId,
+                        status: status,
+                        paid_amount: paidAmount,
+                        due_amount: 0
+                    })
+                })
+                .catch(error => console.error('Error updating invoice:', error));
+        }
 
+        // Delete invoice from database
+        function deleteInvoiceFromDatabase(invoiceId) {
+            fetch('delete_invoice.php', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        id: invoiceId
+                    })
+                })
+                .catch(error => console.error('Error deleting invoice:', error));
+        }
+    </script>
 </body>
 
-</html>
+</html
