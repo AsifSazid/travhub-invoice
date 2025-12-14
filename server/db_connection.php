@@ -2,12 +2,12 @@
 
 $host = 'localhost';
 $username = 'root';
-$dbname = 'travhub_invoice';
-$password = '';
+// $dbname = 'travhub_invoice';
+// $password = '';
 
 // FOR SERVER
-// $dbname = 'sazummec_travhub_invoice';
-// $password = 'C0ww0nR001';
+$dbname = 'sazummec_travhub_invoice';
+$password = 'C0ww0nR001';
 
 try {
     $pdo = new PDO(
