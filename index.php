@@ -751,10 +751,10 @@ try {
                                     <span>Download PDF</span>
                                 </button>
                                 <button class="view-btn bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn"
-                                        onclick="viewInvoice('${invoice.id}')" 
-                                        title="View Details">
-                                    <i class="fas fa-eye mr-3"></i>
-                                    <span>View Details</span>
+                                        onclick="editInvoice('${invoice.id}')" 
+                                        title="Edit Invoice">
+                                    <i class="fas fa-pencil mr-3"></i>
+                                    <span>Edit Invoice</span>
                                 </button>
                                 <button class="send-btn bg-purple-50 hover:bg-purple-100 text-purple-700 border border-purple-200 font-medium py-3.5 px-5 rounded-xl transition duration-300 flex items-center justify-center action-btn"
                                         onclick="sendInvoiceWithOptions('${invoice.id}', '${invoice.client_email}', '${invoice.phone}')" 
@@ -885,9 +885,9 @@ try {
         }
 
         // View invoice details
-        function viewInvoice(invoiceId) {
+        function editInvoice(invoiceId) {
             // You can create a view page or use the print page
-            window.open(`print-invoice.php?id=${invoiceId}`, '_blank');
+            window.open(`edit.php?id=${invoiceId}`);
         }
 
         // Send invoice to client

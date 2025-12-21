@@ -58,8 +58,7 @@ function getNextInvoiceSerial(PDO $pdo, $invoiceDate)
 }
 
 // Function to convert number to words in Bengali/English
-function numberToWords($number)
-{
+function numberToWords($number){
     $ones = array(
         0 => '',
         1 => 'One',

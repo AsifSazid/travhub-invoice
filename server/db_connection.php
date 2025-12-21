@@ -1,14 +1,14 @@
 <?php
 
 $host = 'localhost';
-// $username = 'root';
-// $dbname = 'travhub_invoice';
-// $password = '';
+$username = 'root';
+$dbname = 'travhub_invoice';
+$password = '';
 
 // FOR SERVER
-$username = 'sazummec_common_root';
-$dbname = 'sazummec_travhub_invoice';
-$password = 'C0ww0nR001';
+// $username = 'sazummec_common_root';
+// $dbname = 'sazummec_travhub_invoice';
+// $password = 'C0ww0nR001';
 
 try {
     $pdo = new PDO(
