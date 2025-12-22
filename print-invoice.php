@@ -281,8 +281,10 @@ ob_start();
         @page {
             header: page-header;
             footer: page-footer;
-            margin-top: 180px;
+            margin-top: 220px;
             margin-bottom: 80px;
+
+            margin-header: 22mm;
         }
 
         table {
@@ -589,8 +591,9 @@ $mpdf = new \Mpdf\Mpdf([
             'B' => 'Poppins-SemiBold.ttf',
         ]
     ]),
-    'default_font' => 'poppins'
+    'default_font' => 'poppins',
 ]);
+
 
 // Set PDF metadata
 $mpdf->SetTitle('Invoice ' . $form_data['invoice_no']);
